@@ -62,6 +62,7 @@ class Database:
                 ("relocate", "ALTER TABLE jobs ADD COLUMN relocate INTEGER NOT NULL DEFAULT 0"),
                 ("held", "ALTER TABLE jobs ADD COLUMN held INTEGER NOT NULL DEFAULT 0"),
                 ("disk_bytes", "ALTER TABLE jobs ADD COLUMN disk_bytes INTEGER"),
+                ("disk_measured_at", "ALTER TABLE jobs ADD COLUMN disk_measured_at REAL"),
             ):
                 if name not in columns:
                     self.connection.execute(statement)
