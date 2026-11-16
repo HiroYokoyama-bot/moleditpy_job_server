@@ -159,9 +159,9 @@ def manifest(root):
             from .errors import ServerError
 
             try:
-                path = contained(root, relative)
-                digest = sha256(path)
-                result.append({"path": relative, "size": path.stat().st_size, "sha256": digest})
-            except ServerError:
+                info = contained(root, relative).stat()
+            except (ServerError, OSError):
                 continue
+            if stat.S_ISREG(info.st_mode) and info.st_nlink == 1:
+                result.append({"path": relative, "size": info.st_size})
     return sorted(result, key=lambda item: item["path"])

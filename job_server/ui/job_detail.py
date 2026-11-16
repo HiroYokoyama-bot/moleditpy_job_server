@@ -55,15 +55,13 @@ class JobDetailDialog(QDialog):
         self.log = QPlainTextEdit()
         self.log.setReadOnly(True)
         self.log.setPlaceholderText("No output yet. Refresh to read the latest 64 KiB.")
-        self.files = QTableWidget(0, 3)
-        self.files.setHorizontalHeaderLabels(["Result file", "Bytes", "SHA-256"])
+        self.files = QTableWidget(0, 2)
+        self.files.setHorizontalHeaderLabels(["Result file", "Bytes"])
         self.files.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.files.setWordWrap(False)
         self.files.verticalHeader().setVisible(False)
         self.files.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self.files.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
-        self.files.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Interactive)
-        self.files.setColumnWidth(2, 280)
         self.tabs.addTab(self.command, "Command")
         self.tabs.addTab(self.log, "Latest output (64 KiB)")
         self.tabs.addTab(self.files, "Result files")
@@ -159,7 +157,7 @@ class JobDetailDialog(QDialog):
             self._show_log(log.get("text", ""))
             self.dashboard.fill(
                 self.files,
-                [tuple(str(entry.get(key, "—")) for key in ("path", "size", "sha256"))
+                [tuple(str(entry.get(key, "—")) for key in ("path", "size"))
                  for entry in files[:FILE_LIMIT]],
             )
             self.shown_job = identifier

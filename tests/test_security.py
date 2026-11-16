@@ -175,3 +175,12 @@ def test_output_manifest_excludes_special_files(client, alice):
     work = client.app.state.jobs.directory(job_id)
     os.mkfifo(work / "result")
     assert client.get(f"/api/v1/jobs/{job_id}/files", headers=alice["headers"]).json() == []
+
+
+def test_output_manifest_reports_path_and_size_only(client, alice):
+    job_id = reserve(client, alice).json()["id"]
+    client.post(f"/api/v1/jobs/{job_id}/commit", headers=alice["headers"])
+    work = client.app.state.jobs.directory(job_id)
+    (work / "result.txt").write_bytes(b"abc")
+    entries = client.get(f"/api/v1/jobs/{job_id}/files", headers=alice["headers"]).json()
+    assert entries == [{"path": "result.txt", "size": 3}]

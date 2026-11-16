@@ -44,7 +44,7 @@ def responses(calls):
         if "/log?offset=" in path:
             return {"offset": 134464, "text": "synthetic log"}
         if path.endswith("/files"):
-            return [{"path": "<a>result.txt</a>", "size": 4, "sha256": "0" * 64}]
+            return [{"path": "<a>result.txt</a>", "size": 4}]
         return record(path.rsplit("/", 1)[-1])
     return request
 
