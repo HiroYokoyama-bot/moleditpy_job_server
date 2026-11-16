@@ -9,6 +9,7 @@ import subprocess
 import time
 import uuid
 from collections import deque
+from html import escape
 from urllib.parse import urlsplit
 from urllib.error import URLError
 from datetime import datetime
@@ -53,7 +54,7 @@ from PySide6.QtWidgets import (
 from ..client import ClientError, JobServerClient
 from .units import MB_PER_GB, GBSpinBox, FocusSpinBox, gb
 from .network import LanAddressList
-from ..settings import Settings, pc_resources, pc_size_label
+from ..settings import Settings, pc_description, pc_resources, pc_size_label
 
 
 class Signals(QObject):
@@ -413,6 +414,11 @@ class Dashboard(QDialog):
         self.status_detail = QLabel()
         self.status_detail.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         text.addWidget(self.status_detail)
+        self.description_label = QLabel()
+        self.description_label.setWordWrap(True)
+        self.description_label.setTextFormat(Qt.TextFormat.RichText)
+        self.description_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        text.addWidget(self.description_label)
         self.resources = QLabel()
         self.resources.setWordWrap(True)
         text.addWidget(self.resources)
@@ -439,6 +445,13 @@ class Dashboard(QDialog):
         if version:
             address += "  ·  v" + version
         self.status_detail.setText(address)
+        # Which PC this is, in the owner's words where they gave any: the
+        # fixed line naming the PC and its OS, then their note in grey.
+        label = escape(pc_description(), quote=False)
+        if self.settings.description:
+            note = escape(self.settings.description, quote=False)
+            label += f' <span style="color: #6e7681;">{note}</span>'
+        self.description_label.setText(label)
         self.resources.setText(hint)
         self.status_checked.setText("Checked " + datetime.now().strftime("%H:%M:%S"))
 
@@ -586,6 +599,26 @@ class Dashboard(QDialog):
                 field.setValue(getattr(self.settings, key))
             self.fields[key] = field
             return field
+
+        about = QGroupBox("This PC")
+        about_form = QFormLayout(about)
+        self.description_edit = QLineEdit(self.settings.description)
+        self.description_edit.setMaxLength(500)
+        self.description_edit.setPlaceholderText(
+            "This is a shared job server. Please keep to "
+            f"{self.settings.cpus} cores and {gb(self.settings.memory_mb)} GB "
+            "of memory per job unless you ask first."
+        )
+        about_form.addRow("Description", self.description_edit)
+        about_help = QLabel(
+            "Your note about this PC, shown with the server status — in this window, "
+            "the web monitor, client apps and the API — after the fixed line "
+            f"“{pc_description()}”. Write it for the people and AI agents who will "
+            "use this PC: what it is for, and how to share it."
+        )
+        about_help.setWordWrap(True)
+        about_form.addRow(about_help)
+        layout.addWidget(about)
 
         network = QGroupBox("Network")
         form = QFormLayout(network)
@@ -1301,6 +1334,7 @@ class Dashboard(QDialog):
             ]
             candidate = replace(
                 self.settings,
+                description=self.description_edit.text().strip(),
                 python_executable=self.python_path.text().strip(),
                 job_dir=self.job_dir.text().strip(),
                 finished_dir=self.finished_dir.text().strip(),
