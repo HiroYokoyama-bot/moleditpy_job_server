@@ -125,6 +125,7 @@ server is reachable from this PC only.
 | `create-admin` | Create the first administrator, if `init --admin` did not |
 | `serve` | Run the server |
 | `status` | Ask a running server for its health; reports when it is OFF |
+| `gui` | Open the desktop window without MoleditPy (needs the `gui` extra) |
 | `reset-password <username>` | Recover a forgotten password on the server PC |
 
 | `init` option | Purpose |
@@ -137,10 +138,19 @@ server is reachable from this PC only.
 | `--port`, `--tls-port` | HTTP port (default 8766) and HTTPS port (default 8767) |
 | `--cpus`, `--memory-mb` | Resource budget (default: this PC's size) |
 | `--data-dir PATH` | Data folder (default `~/.moleditpy/job_server/`) |
+| `--description TEXT` | A note about this PC, shown with the server status |
 | `--admin USERNAME` | Also create the first administrator |
 
 Every command accepts `--config /path/to/settings.json`. Data lives in
 `~/.moleditpy/job_server/`. Install `moleditpy-job-server[gui]` for the desktop window.
+The window also opens without MoleditPy — `python -m job_server gui`, or
+`launch_job_server.bat` on Windows — and a second launch brings the running
+window to the front instead of opening another.
+
+Status answers (`status`, the web monitor, the API) name the PC they came
+from: its hostname, a fixed line — "<PC>'s job server running on <OS>" — and
+the owner's own description of the PC when one is set, in the window's
+Settings tab or with `init --description`.
 
 ## Python client
 
