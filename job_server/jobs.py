@@ -8,7 +8,7 @@ from pathlib import Path
 
 from .errors import reject
 from .auth import Auth
-from .files import contained, manifest_record, manifest_stamp, open_regular, sha256
+from .files import contained, listing, manifest_record, manifest_stamp, open_regular, sha256
 
 TERMINAL = {"DONE", "FAILED", "CANCELLED", "LOST"}
 #: The order the dispatcher takes waiting jobs in (force_run DESC, priority
@@ -377,9 +377,11 @@ class Jobs:
             self.db.event(c, "cancel_requested", principal["user_id"], job_id)
         return self.public(self.authorize(job_id, principal))
 
-    def outputs(self, job_id, principal):
+    def outputs(self, job_id, principal, digest=True):
         job = self.authorize(job_id, principal)
         folder = self.directory(job_id)
+        if not digest:
+            return listing(folder)
         # The stored manifest is served while the folder still matches its
         # stamp; when it has moved on — a running job's new output, a first
         # listing nobody recorded — the record is refreshed, reusing the

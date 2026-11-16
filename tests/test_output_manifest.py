@@ -90,6 +90,21 @@ def test_a_queued_jobs_result_list_is_computed_once_and_stored(tmp_path):
     assert jobs.outputs("job1", PRINCIPAL) == expected
 
 
+def test_the_listing_can_be_read_without_digests(client, alice):
+    job_id = reserve(client, alice).json()["id"]
+    client.post(f"/api/v1/jobs/{job_id}/commit", headers=alice["headers"])
+    work = client.app.state.jobs.directory(job_id)
+    (work / "result.txt").write_bytes(b"abc")
+    entries = client.get(
+        f"/api/v1/jobs/{job_id}/files?digest=0", headers=alice["headers"]
+    ).json()
+    assert entries == [{"path": "result.txt", "size": 3}]
+    row = client.app.state.db.one("SELECT manifest FROM jobs WHERE id=?", (job_id,))
+    assert row["manifest"] is None, "Reading without digests records nothing"
+    entries = client.get(f"/api/v1/jobs/{job_id}/files", headers=alice["headers"]).json()
+    assert entries == [{"path": "result.txt", "size": 3, "sha256": DIGEST}]
+
+
 def test_a_recorded_end_stores_the_result_list_with_it(client, alice):
     job_id = reserve(client, alice).json()["id"]
     client.post(f"/api/v1/jobs/{job_id}/commit", headers=alice["headers"])

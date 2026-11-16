@@ -71,7 +71,7 @@ def test_web_assets_and_security_headers(client):
     assert '<body class="signed-out">' in response.text
     assert '<script src="/assets/app.js" defer>' in response.text
     assert 'type="module"' not in response.text
-    assert 'id="login-form" method="dialog"' in response.text
+    assert '<section id="login" class="panel">' in response.text
     assert "frame-ancestors 'none'" in response.headers["Content-Security-Policy"]
     assert client.get("/assets/app.js").status_code == 200
     assert client.get("/assets/app.css").status_code == 200

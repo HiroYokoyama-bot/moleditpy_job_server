@@ -428,8 +428,8 @@ def create_app(settings=None, dispatch=True):
         }
 
     @app.get(prefix + "/jobs/{job_id}/files")
-    def outputs(job_id: str, p=Depends(principal)):
-        return jobs.outputs(job_id, p)
+    def outputs(job_id: str, p=Depends(principal), digest: bool = True):
+        return jobs.outputs(job_id, p, digest=digest)
 
     @app.get(prefix + "/jobs/{job_id}/files/{path:path}")
     def download(job_id: str, path: str, request: Request, p=Depends(principal)):

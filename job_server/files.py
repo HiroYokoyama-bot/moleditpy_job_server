@@ -173,6 +173,16 @@ def _listed(root):
     return sorted(found, key=lambda item: item[0])
 
 
+def listing(root):
+    """A folder's files as path and size only, from a stat-only walk that
+    never reads a file: for views that show the list first and fill the
+    digests in once they are recorded."""
+    return [
+        {"path": relative, "size": info.st_size}
+        for relative, _path, info in _listed(root)
+    ]
+
+
 def manifest_stamp(root):
     """A folder's listed files as (path, size, mtime) rows: a cheap stat-only
     fingerprint that changes whenever a listed file is added, removed or

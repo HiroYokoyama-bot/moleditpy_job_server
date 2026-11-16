@@ -55,13 +55,15 @@ class JobDetailDialog(QDialog):
         self.log = QPlainTextEdit()
         self.log.setReadOnly(True)
         self.log.setPlaceholderText("No output yet. Refresh to read the latest 64 KiB.")
-        self.files = QTableWidget(0, 2)
-        self.files.setHorizontalHeaderLabels(["Result file", "Bytes"])
+        self.files = QTableWidget(0, 3)
+        self.files.setHorizontalHeaderLabels(["Result file", "Bytes", "SHA-256"])
         self.files.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.files.setWordWrap(False)
         self.files.verticalHeader().setVisible(False)
         self.files.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self.files.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        self.files.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Interactive)
+        self.files.setColumnWidth(2, 280)
         self.tabs.addTab(self.command, "Command")
         self.tabs.addTab(self.log, "Latest output (64 KiB)")
         self.tabs.addTab(self.files, "Result files")
@@ -124,7 +126,7 @@ class JobDetailDialog(QDialog):
             metadata = client.request("GET", f"/jobs/{identifier}/log?limit=1")
             offset = max(0, metadata.get("size", 0) - LOG_LIMIT)
             log = client.request("GET", f"/jobs/{identifier}/log?offset={offset}&limit={LOG_LIMIT}")
-            files = client.request("GET", f"/jobs/{identifier}/files")
+            files = client.request("GET", f"/jobs/{identifier}/files?digest=0")
             return job, log, files
 
         task = Task(work)
@@ -157,9 +159,11 @@ class JobDetailDialog(QDialog):
             self._show_log(log.get("text", ""))
             self.dashboard.fill(
                 self.files,
-                [tuple(str(entry.get(key, "—")) for key in ("path", "size"))
+                [tuple(str(entry.get(key, "—")) for key in ("path", "size", "sha256"))
                  for entry in files[:FILE_LIMIT]],
             )
+            if files:
+                self._load_digests(generation, identifier)
             self.shown_job = identifier
             self.finished_job = job.get("state") in FINISHED
             if self.finished_job:
@@ -176,6 +180,40 @@ class JobDetailDialog(QDialog):
             self._tasks.discard(task)
             if current():
                 self.invalidate(message)
+
+        cleanup = (task.signals.finished, task.signals.failed)
+        connect_queued(task.signals.finished, finished, self, (object,), cleanup=cleanup)
+        connect_queued(task.signals.failed, failed, self, (str,), cleanup=cleanup)
+        self.pool.start(task)
+
+    def _load_digests(self, generation, identifier):
+        # The file list is already on screen without its digests, which can
+        # take a while to record for a job with large outputs. They fill in
+        # when they arrive; a failure leaves them blank instead of blanking
+        # the details with them, and the next refresh tries again.
+        client = self.dashboard.client
+
+        def work():
+            return client.request("GET", f"/jobs/{identifier}/files")
+
+        task = Task(work)
+        self._tasks.add(task)
+
+        def current():
+            return generation == self.generation and client is self.dashboard.client and self.isVisible()
+
+        def finished(files):
+            self._tasks.discard(task)
+            if not current():
+                return
+            self.dashboard.fill(
+                self.files,
+                [tuple(str(entry.get(key, "—")) for key in ("path", "size", "sha256"))
+                 for entry in files[:FILE_LIMIT]],
+            )
+
+        def failed(_message):
+            self._tasks.discard(task)
 
         cleanup = (task.signals.finished, task.signals.failed)
         connect_queued(task.signals.finished, finished, self, (object,), cleanup=cleanup)

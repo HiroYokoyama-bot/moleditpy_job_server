@@ -43,8 +43,10 @@ def responses(calls):
             return {"size": 200000, "text": "x"}
         if "/log?offset=" in path:
             return {"offset": 134464, "text": "synthetic log"}
-        if path.endswith("/files"):
+        if path.endswith("/files?digest=0"):
             return [{"path": "<a>result.txt</a>", "size": 4}]
+        if path.endswith("/files"):
+            return [{"path": "<a>result.txt</a>", "size": 4, "sha256": "ab" * 32}]
         return record(path.rsplit("/", 1)[-1])
     return request
 
@@ -66,7 +68,11 @@ def test_job_detail_reads_bounded_log_and_plain_file_metadata(details, monkeypat
     assert dialog.command.toPlainText() == "echo synthetic"
     assert dialog.log.toPlainText() == "synthetic log"
     assert dialog.files.item(0, 0).text() == "<a>result.txt</a>"
+    assert dialog.files.item(0, 2).text() == "—", "The list is shown before its digests"
     assert "/jobs/job-a/log?offset=134464&limit=65536" in calls
+    queued.pop(0).run()
+    app.processEvents()
+    assert dialog.files.item(0, 2).text() == "ab" * 32, "The digests fill in afterwards"
 
 
 def test_job_detail_ignores_previous_job_and_closed_dialog_responses(details, monkeypatch):
@@ -103,8 +109,9 @@ def test_job_detail_authentication_error_clears_previous_contents(details, monke
 
     monkeypatch.setattr(dashboard.client, "request", denied)
     dialog.refresh()
-    queued.pop(0).run()
-    app.processEvents()
+    while queued:
+        queued.pop(0).run()
+        app.processEvents()
     assert dialog.command.toPlainText() == dialog.log.toPlainText() == ""
     assert dialog.files.rowCount() == 0
     assert "expired" in dialog.status.text()
@@ -116,8 +123,11 @@ def test_refreshing_the_shown_job_keeps_it_on_screen_and_follows_until_it_ends(d
     state = {"value": "RUNNING"}
 
     def request(method, path):
-        if path.endswith("/files"):
-            return [{"path": "result.txt", "size": 4, "sha256": "0" * 64}]
+        if "/files" in path:
+            entry = {"path": "result.txt", "size": 4}
+            if "digest=0" not in path:
+                entry["sha256"] = "0" * 64
+            return [entry]
         if "/log" in path:
             return {"size": 3, "offset": 0, "text": "line"}
         return {**record("job-a"), "state": state["value"], "display_state": state["value"]}
@@ -134,10 +144,15 @@ def test_refreshing_the_shown_job_keeps_it_on_screen_and_follows_until_it_ends(d
     state["value"] = "DONE"
     queued.pop(0).run()
     app.processEvents()
+    queued.pop(0).run()
+    app.processEvents()
     assert dialog.values["state"].text() == "DONE"
     assert dialog.files.item(0, 0) is item, "Unchanged result files are not redrawn"
     assert not dialog.follow.isActive(), "A finished job is no longer followed"
     dialog._follow()
+    queued.pop(0).run()
+    app.processEvents()
+    assert dialog.files.item(0, 2).text() == "0" * 64
     assert queued == []
 
 
