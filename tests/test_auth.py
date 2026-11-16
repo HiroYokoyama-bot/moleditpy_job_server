@@ -244,10 +244,17 @@ def test_rate_limit_and_error_envelope(client):
 
 
 def test_origin_and_unauthenticated_boundaries(client):
+    from socket import gethostname
+
+    from job_server.settings import pc_description
+
     assert client.get("/api/v1/health").json() == {
         "status": "ok",
         "api_version": "1",
         "server_version": PLUGIN_VERSION,
+        "hostname": gethostname(),
+        "label": pc_description(),
+        "description": "",
     }
     assert (
         client.get("/api/v1/health", headers={"Origin": "https://example.org"}).status_code == 403

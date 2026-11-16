@@ -180,8 +180,18 @@ function clearPasswordForms() {
   for(const form of [$('#password-form'),$('#reset-form')])form.reset?.();
   $('#password-status').textContent='';$('#reset-status').textContent='';
 }
-function connection(text,online=false) {
-  $('#connection-text').textContent=text;$('#login-connection').textContent=text;
+function connection(text,online=false,note='') {
+  // The owner's note about this PC rides along in grey: it is their words
+  // for the PC's users, not part of the server's own status line.
+  for(const element of [$('#connection-text'),$('#login-connection')]) {
+    element.textContent=text;
+    if(note) {
+      const span=document.createElement('span');
+      span.style.color='#8b949e';
+      span.textContent=' · '+note;
+      element.appendChild(span);
+    }
+  }
   $('#connection-dot').classList.toggle('online',online);
 }
 function requireSession(generation) {
@@ -336,7 +346,7 @@ async function refresh() {
   state.busy=true;state.busyGeneration=generation;
   try {
     const health=await api('GET','/health',null,{public:true});
-    connection('Server online · '+health.server_version,true);
+    connection('Server online · '+health.server_version+' · '+health.label,true,health.description);
     if(!state.me)return;
     if(state.me.role==='admin'&&!$('#accounts').hidden)await accounts();
     const resource=await api('GET','/system/resources');
