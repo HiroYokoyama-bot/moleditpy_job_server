@@ -161,6 +161,16 @@ class Dashboard(QDialog):
         self.setWindowTitle("Job Server")
         self.setWindowIcon(QIcon(str(Path(__file__).resolve().parents[1] / "web" / "icon.png")))
         self.resize(1000, 780)
+        # A control panel, not a question: it stays open beside MoleditPy
+        # and the jobs it watches, so it is a modeless window with the
+        # usual minimise/maximise buttons, and it can go full screen
+        # (View menu, F11).
+        self.setModal(False)
+        self.setWindowFlags(
+            self.windowFlags()
+            | Qt.WindowType.WindowMinimizeButtonHint
+            | Qt.WindowType.WindowMaximizeButtonHint
+        )
         self.config = Path(config) if config else Settings().root / "settings.json"
         if self.config.exists():
             self.settings = Settings.load(self.config)
@@ -241,6 +251,10 @@ class Dashboard(QDialog):
         action(server, "Copy connection addresses", self.copy_connection_addresses)
         action(server, "Copy Tailscale Serve command", lambda: QApplication.clipboard().setText(
             f"tailscale serve --bg http://127.0.0.1:{self.settings.port}"))
+        view = self.menu_bar.addMenu("View")
+        self.fullscreen_action = action(view, "Full screen", self.toggle_fullscreen)
+        self.fullscreen_action.setCheckable(True)
+        self.fullscreen_action.setShortcut("F11")
         account = self.menu_bar.addMenu("Account")
         self.sign_in_action = action(account, "Sign in / register device...", self.sign_in)
         self.change_password_action = action(account, "Change my password...", self.change_password)
@@ -271,6 +285,26 @@ class Dashboard(QDialog):
         self.unforce_action = action(queue, "Cancel force-run request", lambda: self.force_run(False))
         self.cancel_action = action(queue, "Cancel selected job...", self.cancel)
         self.lost_action = action(queue, "Mark stuck job as lost...", self.mark_lost)
+
+    def toggle_fullscreen(self):
+        """Full screen and back (View menu or F11; Esc leaves full screen)."""
+        if self.isFullScreen():
+            self.showNormal()
+        else:
+            self.showFullScreen()
+        self.fullscreen_action.setChecked(self.isFullScreen())
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key.Key_F11:
+            self.toggle_fullscreen()
+            return
+        if event.key() == Qt.Key.Key_Escape and self.isFullScreen():
+            # Esc is also a dialog's close key; in full screen it only
+            # leaves full screen, so a stray Esc never closes the window
+            # out from under the jobs it is watching.
+            self.toggle_fullscreen()
+            return
+        super().keyPressEvent(event)
 
     def copy_connection_addresses(self):
         urls = self.settings.connection_urls or [f"http://127.0.0.1:{self.settings.port}"]
