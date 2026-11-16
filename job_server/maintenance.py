@@ -23,6 +23,10 @@ from .jobs import TERMINAL, work_directory
 
 #: Seconds between maintenance passes.
 INTERVAL = 5
+#: Seconds between disk measurements of one running job: often enough for
+#: the job lists to track a calculation's output growth, rare enough that
+#: the stat-only walk is never a load on the PC doing the computing.
+MEASURE_INTERVAL = 60
 #: Seconds to wait before retrying a move that failed, such as a file held open.
 RETRY_SECONDS = 60
 #: Failed moves after which a job is left where it is.
@@ -102,35 +106,65 @@ class Maintenance:
             self.stop_event.wait(INTERVAL)
 
     def run_once(self):
-        for step in (self.measure_finished, self.relocate_finished, self.backup_if_due, self.archive_events):
+        steps = (
+            self.measure_running,
+            self.measure_finished,
+            self.relocate_finished,
+            self.backup_if_due,
+            self.archive_events,
+        )
+        for step in steps:
             try:
                 step()
             except Exception:
                 logging.exception("Maintenance step failed")
 
-    # Finished jobs -------------------------------------------------------
+    # Disk usage ----------------------------------------------------------
 
-    def measure_finished(self):
-        # An ended job's folder no longer changes, so its size is measured
-        # once here and kept on the job's row for the job lists, instead of
-        # walking folders again on every list request.
+    def _measure(self, job, floor=0.0):
+        folder = work_directory(
+            self.settings, job["work_root"], job["id"],
+            archive_path=job["archive_path"],
+        )
+        measured = disk_usage(folder)
+        with self.db.transaction() as c:
+            c.execute(
+                "UPDATE jobs SET disk_bytes=?,disk_measured_at=? WHERE id=?",
+                (measured, max(time.time(), floor), job["id"]),
+            )
+
+    def measure_running(self):
+        # A running job's folder grows as the calculation writes, so it is
+        # re-measured at most once a minute: the job lists then track the
+        # growth without any list request ever walking a folder.
         rows = self.db.rows(
-            "SELECT * FROM jobs WHERE state IN ('DONE','FAILED','CANCELLED','LOST') "
-            "AND disk_bytes IS NULL ORDER BY ended_at,id LIMIT 100"
+            "SELECT * FROM jobs WHERE state='RUNNING' "
+            "AND (disk_measured_at IS NULL OR disk_measured_at<?) "
+            "ORDER BY disk_measured_at,id LIMIT 100",
+            (time.time() - MEASURE_INTERVAL,),
         )
         for job in rows:
             if self.stop_event.is_set():
                 return
-            folder = work_directory(
-                self.settings, job["work_root"], job["id"],
-                archive_path=job["archive_path"],
-            )
-            measured = disk_usage(folder)
-            with self.db.transaction() as c:
-                c.execute(
-                    "UPDATE jobs SET disk_bytes=? WHERE id=? AND disk_bytes IS NULL",
-                    (measured, job["id"]),
-                )
+            self._measure(job)
+
+    # Finished jobs -------------------------------------------------------
+
+    def measure_finished(self):
+        # An ended job's folder no longer changes, so once it has been
+        # measured after its end the total is final and kept on the row,
+        # instead of walking folders again on every list request.
+        rows = self.db.rows(
+            "SELECT * FROM jobs WHERE state IN ('DONE','FAILED','CANCELLED','LOST') "
+            "AND (disk_measured_at IS NULL OR disk_measured_at<ended_at) "
+            "ORDER BY ended_at,id LIMIT 100"
+        )
+        for job in rows:
+            if self.stop_event.is_set():
+                return
+            # The stamp is floored at the job's end, so "measured after it
+            # ended" holds by construction and the job is never picked again.
+            self._measure(job, floor=job["ended_at"] or 0.0)
 
     def relocate_finished(self):
         if not self.settings.finished_dir:
