@@ -95,10 +95,11 @@ def test_account_menu_is_available_on_every_tab(dashboard, monkeypatch):
     assert [action.text() for action in dashboard.menu_bar.actions()] == [
         "File",
         "Server",
+        "View",
         "Account",
         "Queue",
     ]
-    account = dashboard.menu_bar.actions()[2].menu()
+    account = dashboard.menu_bar.actions()[3].menu()
     assert account.actions()[0] is dashboard.sign_in_action
     assert dashboard.sign_in_action.text() == "Sign in / register device..."
     assert dashboard.menu_bar.parent() is dashboard
