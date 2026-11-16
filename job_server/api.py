@@ -3,6 +3,7 @@ import re
 import time
 import uuid
 from contextlib import asynccontextmanager
+from socket import gethostname
 
 from fastapi import Depends, FastAPI, Header, Query, Request
 from fastapi.exceptions import RequestValidationError
@@ -25,11 +26,14 @@ from .schemas import (
     Challenge, Enrollment, ForceRun, Hold, JobResources, JobSpec, Login, PasswordChange, PasswordReset, Pause, Priority,
     RoleChange, Token, UserCreate,
 )
-from .settings import Settings
+from .settings import Settings, pc_description
 
 
 def create_app(settings=None, dispatch=True):
     settings = (settings or Settings()).validate()
+    # This PC's name and fixed status line, reported with its status.
+    hostname = gethostname()
+    label = pc_description()
     db = Database(settings.root)
     auth = Auth(db, settings)
     jobs = Jobs(db, settings, auth)
@@ -186,7 +190,16 @@ def create_app(settings=None, dispatch=True):
     @app.get(prefix + "/health")
     def health():
         ready = getattr(app.state, "listeners_ready", lambda: True)()
-        return {"status": "ok" if ready else "starting", "api_version": "1", "server_version": PLUGIN_VERSION}
+        return {
+            "status": "ok" if ready else "starting",
+            "api_version": "1",
+            "server_version": PLUGIN_VERSION,
+            "hostname": hostname,
+            # Unauthenticated on purpose: `status` and a first-time client
+            # or agent should know what this PC is before signing in.
+            "label": label,
+            "description": settings.description,
+        }
 
     @app.get(prefix + "/tls/ca")
     def public_ca():
@@ -208,6 +221,9 @@ def create_app(settings=None, dispatch=True):
         return {
             "api_version": "1",
             "server_version": PLUGIN_VERSION,
+            "hostname": hostname,
+            "label": label,
+            "description": settings.description,
             "server_id": db.metadata("server_id"),
             "execution_os": settings.execution_os,
             "enforcement": "advisory",
@@ -478,7 +494,15 @@ def create_app(settings=None, dispatch=True):
 
     @app.get(prefix + "/system/resources")
     def resources(p=Depends(principal)):
-        return {**scheduler.resources(), **host_usage()}
+        # Name and description ride along: monitors already poll this
+        # endpoint for the host's state, so they need no second request.
+        return {
+            **scheduler.resources(),
+            **host_usage(),
+            "hostname": hostname,
+            "label": label,
+            "description": settings.description,
+        }
 
     @app.get(prefix + "/system/resources/history")
     def resource_history(p=Depends(principal), since: float = Query(0.0, ge=0.0, le=1e11)):

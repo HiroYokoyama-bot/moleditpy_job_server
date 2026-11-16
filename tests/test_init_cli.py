@@ -97,3 +97,9 @@ def test_status_of_a_stopped_server_says_so(init, monkeypatch, capsys):
     monkeypatch.setattr(sys, "argv", ["job-server", "status", "--config", str(init.config)])
     assert main() == 1
     assert "Server is OFF" in capsys.readouterr().err
+
+
+def test_init_writes_the_pc_description(init):
+    code, _ = init("--description", "Shared DFT box in Lab 3")
+    assert code == 0
+    assert Settings.load(init.config).description == "Shared DFT box in Lab 3"

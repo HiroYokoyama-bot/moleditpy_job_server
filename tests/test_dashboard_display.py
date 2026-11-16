@@ -95,10 +95,11 @@ def test_account_menu_is_available_on_every_tab(dashboard, monkeypatch):
     assert [action.text() for action in dashboard.menu_bar.actions()] == [
         "File",
         "Server",
+        "View",
         "Account",
         "Queue",
     ]
-    account = dashboard.menu_bar.actions()[2].menu()
+    account = dashboard.menu_bar.actions()[3].menu()
     assert account.actions()[0] is dashboard.sign_in_action
     assert dashboard.sign_in_action.text() == "Sign in / register device..."
     assert dashboard.menu_bar.parent() is dashboard
@@ -233,7 +234,8 @@ def test_refresh_displays_names_status_and_local_access_time(dashboard, monkeypa
     assert dashboard.selected(dashboard.jobs) == "job-id"
     assert dashboard.jobs.item(0, 0).text() == "test"
     assert dashboard.jobs.item(0, 4).text() == "—"  # This reply carries no resources.
-    assert dashboard.jobs.item(0, 6).text() == "job-id"
+    assert dashboard.jobs.item(0, 5).text() == "—"  # Nor a disk size.
+    assert dashboard.jobs.item(0, 7).text() == "job-id"
     assert dashboard.users.item(0, 0).text() == "alice"
     assert dashboard.users.item(0, 2).text() == "Enabled"
     assert dashboard.devices.item(0, 1).text() == "alice"

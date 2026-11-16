@@ -74,6 +74,7 @@ def _init(args):
         print(f"Using this PC's private address {address}")
     cpus, memory_mb = pc_resources()
     settings = Settings(
+        description=args.description or "",
         cpus=cpus if args.cpus is None else args.cpus,
         memory_mb=memory_mb if args.memory_mb is None else args.memory_mb,
         lan_bind_address=address,
@@ -125,7 +126,7 @@ def main():
     parser = argparse.ArgumentParser(description="MoleditPy Job Server — LAN computational helper")
     parser.add_argument("--config", type=Path)
     sub = parser.add_subparsers(dest="action", required=True)
-    for name in ("serve", "status", "init", "create-admin", "reset-password"):
+    for name in ("serve", "status", "init", "gui", "create-admin", "reset-password"):
         child = sub.add_parser(name)
         child.add_argument("--config", type=Path, default=argparse.SUPPRESS)
         if name == "init":
@@ -148,6 +149,11 @@ def main():
                 help="also serve the LAN address over plain HTTP",
             )
             child.add_argument("--hostname", default="", help="this PC's .local name")
+            child.add_argument(
+                "--description",
+                help="a note about this PC, shown with the server status after "
+                "the fixed line naming this PC and its OS",
+            )
             child.add_argument("--port", type=int, help="local/LAN HTTP port")
             child.add_argument("--tls-port", type=int, help="local HTTPS port")
             child.add_argument("--cpus", type=int, help="CPU budget (default: this PC)")
@@ -167,6 +173,12 @@ def main():
     try:
         if args.action == "init":
             return _init(args)
+        if args.action == "gui":
+            # The window reads the configuration itself, like it does inside
+            # MoleditPy; a missing file is a first run, not an error.
+            from .ui.standalone import run_gui
+
+            return run_gui(args.config)
         settings = Settings.load(args.config)
         if args.action == "serve":
             from .server_app import serve

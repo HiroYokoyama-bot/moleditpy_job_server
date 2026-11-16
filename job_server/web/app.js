@@ -180,8 +180,18 @@ function clearPasswordForms() {
   for(const form of [$('#password-form'),$('#reset-form')])form.reset?.();
   $('#password-status').textContent='';$('#reset-status').textContent='';
 }
-function connection(text,online=false) {
-  $('#connection-text').textContent=text;$('#login-connection').textContent=text;
+function connection(text,online=false,note='') {
+  // The owner's note about this PC rides along in grey: it is their words
+  // for the PC's users, not part of the server's own status line.
+  for(const element of [$('#connection-text'),$('#login-connection')]) {
+    element.textContent=text;
+    if(note) {
+      const span=document.createElement('span');
+      span.style.color='#8b949e';
+      span.textContent=' · '+note;
+      element.appendChild(span);
+    }
+  }
   $('#connection-dot').classList.toggle('online',online);
 }
 function requireSession(generation) {
@@ -336,7 +346,7 @@ async function refresh() {
   state.busy=true;state.busyGeneration=generation;
   try {
     const health=await api('GET','/health',null,{public:true});
-    connection('Server online · '+health.server_version,true);
+    connection('Server online · '+health.server_version+' · '+health.label,true,health.description);
     if(!state.me)return;
     if(state.me.role==='admin'&&!$('#accounts').hidden)await accounts();
     const resource=await api('GET','/system/resources');
@@ -370,9 +380,9 @@ async function refresh() {
       const name=cell(row,job.spec.name,'job-name');
       const id=document.createElement('small');id.className='job-id';id.textContent=(admin?(state.names[job.owner_id]||'(deleted user)')+' · ':'')+job.id;name.append(id);
       const status=cell(row,'');const badge=document.createElement('span');badge.className='badge '+job.display_state.toLowerCase();badge.textContent=job.display_state;status.append(badge);const priority=document.createElement('small');priority.className='job-id';priority.textContent='Priority '+(job.priority??0)+(job.force_run?' · Force requested':'')+(typeof job.queue_ahead==='number'?' · '+ahead(job.queue_ahead):'');status.append(priority);
-      cell(row,cores(job.spec.resources.cpus_per_task)+' · '+gb(job.spec.resources.memory_mb)+' GiB');cell(row,date(job.created_at));button(cell(row,''),'Open',()=>detail(job.id));rows.push(row);
+      cell(row,cores(job.spec.resources.cpus_per_task)+' · '+gb(job.spec.resources.memory_mb)+' GiB');cell(row,size(job.disk_bytes));cell(row,date(job.created_at));button(cell(row,''),'Open',()=>detail(job.id));rows.push(row);
     }
-    if(!jobs.length){const row=document.createElement('tr');const empty=cell(row,'No jobs on this page.','empty');empty.colSpan=5;rows.push(row);}
+    if(!jobs.length){const row=document.createElement('tr');const empty=cell(row,'No jobs on this page.','empty');empty.colSpan=6;rows.push(row);}
     return rows;});
     filterJobs();
     $('#previous-page').disabled=state.page===0;$('#next-page').disabled=jobs.length<50;$('#page-number').textContent='Page '+(state.page+1);

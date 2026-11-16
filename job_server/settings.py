@@ -1,9 +1,23 @@
 import json
 import os
+import platform
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
+from socket import gethostname
 
 from .files import atomic_write
+
+
+def pc_description():
+    """The fixed first part of every status description.
+
+    Names the PC and its OS, so any server can be told apart from the
+    others on a LAN: "Violet-PC's job server running on Windows".
+    """
+    system = platform.system()
+    if system == "Darwin":
+        system = "macOS"
+    return f"{gethostname()}'s job server running on {system}"
 
 
 def pc_cpus():
@@ -83,6 +97,11 @@ class Settings:
     tls_port: int = 8767
     python_executable: str = ""
     job_setup_commands: list[str] = field(default_factory=list)
+    #: The owner's own note about this PC, shown with the server status
+    #: (dashboard, web monitor, /health, /capabilities, /system/resources)
+    #: after the fixed line naming the PC and its OS, so users and AI
+    #: agents can tell what the PC is for and how to share it.
+    description: str = ""
 
     @property
     def connection_urls(self):
@@ -243,6 +262,7 @@ class Settings:
         self._validate_finished_dir()
         self._validate_backup_dir()
         self._validate_job_setup()
+        self._validate_description()
         if not self.trusted_users_only:
             raise ValueError(
                 "This server supports trusted users only; OS isolation is not implemented"
@@ -270,6 +290,16 @@ class Settings:
             raise ValueError("Each job setup command must be one line")
         if sum(len(command) for command in commands) > 65536:
             raise ValueError("Job setup commands are too long")
+
+    def _validate_description(self):
+        # The description is printed into status answers and shown on other
+        # PCs, so it stays a single short line of plain text.
+        if not isinstance(self.description, str):
+            raise ValueError("description must be text")
+        if len(self.description) > 500:
+            raise ValueError("The PC description is too long (500 characters at most)")
+        if any(ord(c) < 32 or ord(c) == 127 for c in self.description):
+            raise ValueError("The PC description must be a single line of text")
 
     def _validate_job_dir(self):
         if not isinstance(self.job_dir, str):

@@ -13,6 +13,19 @@ def gb(mb):
     return f"{mb / MB_PER_GB:.1f}"
 
 
+def byte_size(size_bytes):
+    """Return a byte count in binary units, such as "512 B", "1.5 KB" or "—"."""
+    if size_bytes is None or isinstance(size_bytes, bool) or not isinstance(size_bytes, (int, float)):
+        return "—"
+    if size_bytes < 1024:
+        return f"{int(size_bytes)} B"
+    value = float(size_bytes)
+    for unit in ("KB", "MB", "GB", "TB"):
+        value /= 1024
+        if value < 1024 or unit == "TB":
+            return f"{value:.1f} {unit}"
+
+
 class FocusedWheel:
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)

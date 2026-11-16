@@ -9,6 +9,7 @@ import subprocess
 import time
 import uuid
 from collections import deque
+from html import escape
 from urllib.parse import urlsplit
 from urllib.error import URLError
 from datetime import datetime
@@ -51,9 +52,9 @@ from PySide6.QtWidgets import (
 )
 
 from ..client import ClientError, JobServerClient
-from .units import MB_PER_GB, GBSpinBox, FocusSpinBox, gb
+from .units import MB_PER_GB, GBSpinBox, FocusSpinBox, byte_size, gb
 from .network import LanAddressList
-from ..settings import Settings, pc_resources, pc_size_label
+from ..settings import Settings, pc_description, pc_resources, pc_size_label
 
 
 class Signals(QObject):
@@ -160,6 +161,16 @@ class Dashboard(QDialog):
         self.setWindowTitle("Job Server")
         self.setWindowIcon(QIcon(str(Path(__file__).resolve().parents[1] / "web" / "icon.png")))
         self.resize(1000, 780)
+        # A control panel, not a question: it stays open beside MoleditPy
+        # and the jobs it watches, so it is a modeless window with the
+        # usual minimise/maximise buttons, and it can go full screen
+        # (View menu, F11).
+        self.setModal(False)
+        self.setWindowFlags(
+            self.windowFlags()
+            | Qt.WindowType.WindowMinimizeButtonHint
+            | Qt.WindowType.WindowMaximizeButtonHint
+        )
         self.config = Path(config) if config else Settings().root / "settings.json"
         if self.config.exists():
             self.settings = Settings.load(self.config)
@@ -240,6 +251,10 @@ class Dashboard(QDialog):
         action(server, "Copy connection addresses", self.copy_connection_addresses)
         action(server, "Copy Tailscale Serve command", lambda: QApplication.clipboard().setText(
             f"tailscale serve --bg http://127.0.0.1:{self.settings.port}"))
+        view = self.menu_bar.addMenu("View")
+        self.fullscreen_action = action(view, "Full screen", self.toggle_fullscreen)
+        self.fullscreen_action.setCheckable(True)
+        self.fullscreen_action.setShortcut("F11")
         account = self.menu_bar.addMenu("Account")
         self.sign_in_action = action(account, "Sign in / register device...", self.sign_in)
         self.change_password_action = action(account, "Change my password...", self.change_password)
@@ -270,6 +285,26 @@ class Dashboard(QDialog):
         self.unforce_action = action(queue, "Cancel force-run request", lambda: self.force_run(False))
         self.cancel_action = action(queue, "Cancel selected job...", self.cancel)
         self.lost_action = action(queue, "Mark stuck job as lost...", self.mark_lost)
+
+    def toggle_fullscreen(self):
+        """Full screen and back (View menu or F11; Esc leaves full screen)."""
+        if self.isFullScreen():
+            self.showNormal()
+        else:
+            self.showFullScreen()
+        self.fullscreen_action.setChecked(self.isFullScreen())
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key.Key_F11:
+            self.toggle_fullscreen()
+            return
+        if event.key() == Qt.Key.Key_Escape and self.isFullScreen():
+            # Esc is also a dialog's close key; in full screen it only
+            # leaves full screen, so a stray Esc never closes the window
+            # out from under the jobs it is watching.
+            self.toggle_fullscreen()
+            return
+        super().keyPressEvent(event)
 
     def copy_connection_addresses(self):
         urls = self.settings.connection_urls or [f"http://127.0.0.1:{self.settings.port}"]
@@ -374,16 +409,16 @@ class Dashboard(QDialog):
         self.newer_jobs.setEnabled(False)
         self.older_jobs.setEnabled(False)
         layout.addLayout(filters)
-        self.jobs = QTableWidget(0, 8)
+        self.jobs = QTableWidget(0, 9)
         self.jobs.setHorizontalHeaderLabels(
-            ["Name", "Owner", "State", "Priority", "Reserved", "Elapsed", "Job ID", "Submitted (local)"]
+            ["Name", "Owner", "State", "Priority", "Reserved", "Disk", "Elapsed", "Job ID", "Submitted (local)"]
         )
         self.jobs.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.jobs.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.jobs.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.jobs.verticalHeader().setVisible(False)
         self.jobs.verticalHeader().setDefaultSectionSize(34)
-        self._table_layout(self.jobs, (220, 110, 110, 70, 130, 90, 270, 170))
+        self._table_layout(self.jobs, (220, 110, 110, 70, 130, 90, 90, 270, 170))
         self.jobs.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self.jobs.setShowGrid(False)
         self.jobs.itemSelectionChanged.connect(self._update_job_actions)
@@ -413,6 +448,11 @@ class Dashboard(QDialog):
         self.status_detail = QLabel()
         self.status_detail.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         text.addWidget(self.status_detail)
+        self.description_label = QLabel()
+        self.description_label.setWordWrap(True)
+        self.description_label.setTextFormat(Qt.TextFormat.RichText)
+        self.description_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        text.addWidget(self.description_label)
         self.resources = QLabel()
         self.resources.setWordWrap(True)
         text.addWidget(self.resources)
@@ -439,6 +479,13 @@ class Dashboard(QDialog):
         if version:
             address += "  ·  v" + version
         self.status_detail.setText(address)
+        # Which PC this is, in the owner's words where they gave any: the
+        # fixed line naming the PC and its OS, then their note in grey.
+        label = escape(pc_description(), quote=False)
+        if self.settings.description:
+            note = escape(self.settings.description, quote=False)
+            label += f' <span style="color: #6e7681;">{note}</span>'
+        self.description_label.setText(label)
         self.resources.setText(hint)
         self.status_checked.setText("Checked " + datetime.now().strftime("%H:%M:%S"))
 
@@ -586,6 +633,28 @@ class Dashboard(QDialog):
                 field.setValue(getattr(self.settings, key))
             self.fields[key] = field
             return field
+
+        about = QGroupBox("This PC")
+        about_form = QFormLayout(about)
+        self.description_edit = QLineEdit(self.settings.description)
+        self.description_edit.setMaxLength(500)
+        self.description_edit.setPlaceholderText(
+            "This is a shared job server. Please keep to "
+            f"{self.settings.cpus} cores and {gb(self.settings.memory_mb)} GB "
+            "of memory per job unless you ask first."
+        )
+        about_form.addRow("Description", self.description_edit)
+        about_help = QLabel(
+            "Your note about this PC, shown with the server status — in this window, "
+            "the web monitor, client apps and the API — after the fixed line "
+            f"“{pc_description()}”. It is answered before sign-in, so anyone who can "
+            "reach this server can read it: write it for the people and AI agents "
+            "who will use this PC — what it is for, and how to share it — and keep "
+            "private details out of it."
+        )
+        about_help.setWordWrap(True)
+        about_form.addRow(about_help)
+        layout.addWidget(about)
 
         network = QGroupBox("Network")
         form = QFormLayout(network)
@@ -992,7 +1061,8 @@ class Dashboard(QDialog):
                     (j["spec"]["name"], usernames.get(j["owner_id"], "(deleted user)"),
                      j["display_state"] + (" · force requested" if j.get("force_run") else "")
                      + (" · needs recheck" if self._stuck(j) else ""),
-                     j.get("priority", 0), reserved_text(j), elapsed_text(j, now), j["id"],
+                     j.get("priority", 0), reserved_text(j), byte_size(j.get("disk_bytes")),
+                     elapsed_text(j, now), j["id"],
                      self.timestamp(j.get("created_at")))
                     for j in data["jobs"]
                 ], identifiers=[j["id"] for j in data["jobs"]],
@@ -1301,6 +1371,7 @@ class Dashboard(QDialog):
             ]
             candidate = replace(
                 self.settings,
+                description=self.description_edit.text().strip(),
                 python_executable=self.python_path.text().strip(),
                 job_dir=self.job_dir.text().strip(),
                 finished_dir=self.finished_dir.text().strip(),
