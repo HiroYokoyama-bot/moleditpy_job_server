@@ -148,12 +148,12 @@ The window also opens without MoleditPy — `python -m job_server gui`, or
 window to the front instead of opening another.
 
 Status answers (`status`, the web monitor, the API) name the PC they came
-from: its hostname, a fixed line — "<PC>'s job server running on <OS>" — and
-the owner's own description of the PC when one is set, in the window's
-Settings tab or with `init --description`. The name and description are
-answered before sign-in, so a client can tell which PC it reached: anyone
-who can reach the server can read them, so keep private details out of the
-description.
+from: its hostname and a fixed line — "<PC>'s job server running on <OS>".
+The name is answered before sign-in, so a client can tell which PC it
+reached. The owner's own description of the PC, set in the window's
+Settings tab or with `init --description`, is not one of the answers: it
+stays on the server PC, shown in the dashboard's status banner and added
+to the `status` command's output there.
 
 ## Python client
 

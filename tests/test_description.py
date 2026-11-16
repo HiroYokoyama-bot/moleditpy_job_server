@@ -97,10 +97,10 @@ def test_description_must_be_one_short_line_of_text(value):
         Settings(description=value).validate()
 
 
-def test_health_reports_the_description_without_sign_in(described):
+def test_health_names_the_pc_without_the_description(described):
     answer = described.get("/api/v1/health")
     assert answer.status_code == 200
-    assert answer.json()["description"] == DESCRIPTION
+    assert "description" not in answer.json()
     assert answer.json()["label"] == pc_description()
 
 
@@ -119,17 +119,17 @@ def test_status_answers_name_the_pc(described):
         assert answer.json()["hostname"] == gethostname(), path
 
 
-def test_capabilities_report_the_description(described):
+def test_capabilities_do_not_carry_the_description(described):
     answer = described.get("/api/v1/capabilities", headers=_device_headers(described))
     assert answer.status_code == 200
-    assert answer.json()["description"] == DESCRIPTION
+    assert "description" not in answer.json()
     assert answer.json()["label"] == pc_description()
 
 
-def test_system_resources_report_the_description(described):
+def test_system_resources_do_not_carry_the_description(described):
     answer = described.get("/api/v1/system/resources", headers=_device_headers(described))
     assert answer.status_code == 200
-    assert answer.json()["description"] == DESCRIPTION
+    assert "description" not in answer.json()
     assert answer.json()["label"] == pc_description()
 
 
@@ -140,7 +140,7 @@ def test_the_fixed_label_names_the_pc_and_its_os():
     assert "job server running on" in pc_description()
 
 
-def test_an_unset_description_is_empty_but_the_label_still_names_the_pc(client):
+def test_an_unset_description_still_leaves_the_label_naming_the_pc(client):
     answer = client.get("/api/v1/health").json()
-    assert answer["description"] == ""
+    assert "description" not in answer
     assert answer["label"] == pc_description()

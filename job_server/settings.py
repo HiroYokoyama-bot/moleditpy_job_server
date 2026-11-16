@@ -292,8 +292,8 @@ class Settings:
             raise ValueError("Job setup commands are too long")
 
     def _validate_description(self):
-        # The description is printed into status answers and shown on other
-        # PCs, so it stays a single short line of plain text.
+        # The description is shown only on this PC (the dashboard banner
+        # and the status command), so it stays a single short line of text.
         if not isinstance(self.description, str):
             raise ValueError("description must be text")
         if len(self.description) > 500:

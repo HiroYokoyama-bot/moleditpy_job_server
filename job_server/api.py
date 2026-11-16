@@ -198,7 +198,6 @@ def create_app(settings=None, dispatch=True):
             # Unauthenticated on purpose: `status` and a first-time client
             # or agent should know what this PC is before signing in.
             "label": label,
-            "description": settings.description,
         }
 
     @app.get(prefix + "/tls/ca")
@@ -223,7 +222,6 @@ def create_app(settings=None, dispatch=True):
             "server_version": PLUGIN_VERSION,
             "hostname": hostname,
             "label": label,
-            "description": settings.description,
             "server_id": db.metadata("server_id"),
             "execution_os": settings.execution_os,
             "enforcement": "advisory",
@@ -494,14 +492,13 @@ def create_app(settings=None, dispatch=True):
 
     @app.get(prefix + "/system/resources")
     def resources(p=Depends(principal)):
-        # Name and description ride along: monitors already poll this
-        # endpoint for the host's state, so they need no second request.
+        # The PC's name rides along: monitors already poll this endpoint
+        # for the host's state, so they need no second request.
         return {
             **scheduler.resources(),
             **host_usage(),
             "hostname": hostname,
             "label": label,
-            "description": settings.description,
         }
 
     @app.get(prefix + "/system/resources/history")

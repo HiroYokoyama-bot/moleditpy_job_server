@@ -254,7 +254,6 @@ def test_origin_and_unauthenticated_boundaries(client):
         "server_version": PLUGIN_VERSION,
         "hostname": gethostname(),
         "label": pc_description(),
-        "description": "",
     }
     assert (
         client.get("/api/v1/health", headers={"Origin": "https://example.org"}).status_code == 403

@@ -191,7 +191,11 @@ def main():
             if not settings.root.exists() or directory_is_idle(settings.root):
                 raise RuntimeError(f"Server is OFF. Start it with: {_command('serve', args)}")
             client = JobServerClient(f"http://127.0.0.1:{settings.port}", timeout=3)
-            print(json.dumps(client.request("GET", "/health", authenticated=False)))
+            health = client.request("GET", "/health", authenticated=False)
+            # The owner's description never leaves this PC over the API;
+            # status runs here, so it adds the local setting itself.
+            health["description"] = settings.description
+            print(json.dumps(health))
         elif args.action == "create-admin":
             print(json.dumps(_create_admin(settings)))
         elif args.action == "reset-password":
