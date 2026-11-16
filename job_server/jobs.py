@@ -8,7 +8,7 @@ from pathlib import Path
 
 from .errors import reject
 from .auth import Auth
-from .files import contained, manifest, open_regular, sha256
+from .files import contained, manifest_record, manifest_stamp, open_regular, sha256
 
 TERMINAL = {"DONE", "FAILED", "CANCELLED", "LOST"}
 #: The order the dispatcher takes waiting jobs in (force_run DESC, priority
@@ -378,5 +378,19 @@ class Jobs:
         return self.public(self.authorize(job_id, principal))
 
     def outputs(self, job_id, principal):
-        self.authorize(job_id, principal)
-        return manifest(self.directory(job_id))
+        job = self.authorize(job_id, principal)
+        folder = self.directory(job_id)
+        # The stored manifest is served while the folder still matches its
+        # stamp; when it has moved on — a running job's new output, a first
+        # listing nobody recorded — the record is refreshed, reusing the
+        # digests of the files that did not change, and stored again. A
+        # listing therefore reads only what changed since the last one.
+        stored = json.loads(job["manifest"]) if job["manifest"] else None
+        if stored and stored["stamp"] == manifest_stamp(folder):
+            return stored["entries"]
+        record = manifest_record(folder, stored)
+        with self.db.transaction() as c:
+            c.execute(
+                "UPDATE jobs SET manifest=? WHERE id=?", (json.dumps(record), job_id)
+            )
+        return record["entries"]

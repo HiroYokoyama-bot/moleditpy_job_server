@@ -1,0 +1,112 @@
+"""A job's result list: computed once with digests, then served from storage."""
+
+import hashlib
+import json
+import time
+
+from job_server.db import Database
+from job_server.jobs import Jobs
+from job_server.maintenance import Maintenance
+from job_server.settings import Settings
+
+from .conftest import reserve
+
+DIGEST = hashlib.sha256(b"abc").hexdigest()
+PRINCIPAL = {"user_id": "u1", "role": "user"}
+
+
+def _stack(tmp_path, state, ended_at=None):
+    settings = Settings(data_dir=str(tmp_path / "data"))
+    db = Database(settings.root)
+    jobs = Jobs(db, settings)
+    with db.transaction() as c:
+        c.execute(
+            "INSERT INTO users (id,username,password_hash,role,created_at) "
+            "VALUES ('u1','alice','x','user',1.0)"
+        )
+        c.execute(
+            "INSERT INTO jobs (id,owner_id,spec,state,created_at,started_at,ended_at,work_root) "
+            "VALUES ('job1','u1',?,?,?,?,?,?)",
+            (
+                json.dumps({"name": "job", "after_job": None}), state, 1.0, 2.0,
+                ended_at, str(settings.job_root),
+            ),
+        )
+    folder = jobs.directory("job1")
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "result.txt").write_bytes(b"abc")
+    return settings, db, jobs
+
+
+def test_a_running_jobs_first_list_is_recorded_with_digests(tmp_path):
+    _settings, db, jobs = _stack(tmp_path, "RUNNING")
+    expected = [{"path": "result.txt", "size": 3, "sha256": DIGEST}]
+    assert jobs.outputs("job1", PRINCIPAL) == expected
+    assert db.one("SELECT manifest FROM jobs WHERE id='job1'")["manifest"] is not None
+
+
+def test_a_running_jobs_list_tracks_new_output(tmp_path):
+    _settings, _db, jobs = _stack(tmp_path, "RUNNING")
+    assert jobs.outputs("job1", PRINCIPAL) == [
+        {"path": "result.txt", "size": 3, "sha256": DIGEST}
+    ]
+    folder = jobs.directory("job1")
+    (folder / "result.txt").write_bytes(b"abc plus more")
+    (folder / "second.txt").write_bytes(b"xy")
+    entries = jobs.outputs("job1", PRINCIPAL)
+    assert entries == [
+        {
+            "path": "result.txt", "size": 13,
+            "sha256": hashlib.sha256(b"abc plus more").hexdigest(),
+        },
+        {
+            "path": "second.txt", "size": 2,
+            "sha256": hashlib.sha256(b"xy").hexdigest(),
+        },
+    ]
+
+
+def test_maintenance_stores_a_finished_jobs_result_list_once(tmp_path):
+    settings, db, jobs = _stack(tmp_path, "DONE", ended_at=2.0)
+    Maintenance(db, jobs, settings).store_manifests()
+    expected = [{"path": "result.txt", "size": 3, "sha256": DIGEST}]
+    stored = json.loads(db.one("SELECT manifest FROM jobs WHERE id='job1'")["manifest"])
+    assert stored["entries"] == expected
+    assert jobs.outputs("job1", PRINCIPAL) == expected
+    # A folder that no longer matches the stored stamp is listed afresh.
+    (jobs.directory("job1") / "result.txt").write_bytes(b"changed!")
+    refreshed = jobs.outputs("job1", PRINCIPAL)
+    assert refreshed == [{
+        "path": "result.txt", "size": 8,
+        "sha256": hashlib.sha256(b"changed!").hexdigest(),
+    }]
+
+
+def test_a_queued_jobs_result_list_is_computed_once_and_stored(tmp_path):
+    _settings, db, jobs = _stack(tmp_path, "PENDING")
+    expected = [{"path": "result.txt", "size": 3, "sha256": DIGEST}]
+    assert jobs.outputs("job1", PRINCIPAL) == expected
+    assert db.one("SELECT manifest FROM jobs WHERE id='job1'")["manifest"] is not None
+    assert jobs.outputs("job1", PRINCIPAL) == expected
+
+
+def test_a_recorded_end_stores_the_result_list_with_it(client, alice):
+    job_id = reserve(client, alice).json()["id"]
+    client.post(f"/api/v1/jobs/{job_id}/commit", headers=alice["headers"])
+    db = client.app.state.db
+    with db.transaction() as c:
+        c.execute(
+            "UPDATE jobs SET state='RUNNING',started_at=?,pid=4242,process_started=1.0 WHERE id=?",
+            (time.time(), job_id),
+        )
+    work = client.app.state.jobs.directory(job_id)
+    (work / "result.txt").write_bytes(b"abc")
+    control = client.app.state.settings.root / "control" / job_id
+    control.mkdir(parents=True, exist_ok=True)
+    (control / "done.json").write_text(json.dumps({
+        "state": "DONE", "reason": "", "exit_code": 0, "ended_at": time.time(),
+    }))
+    client.app.state.scheduler.reconcile()
+    assert db.one("SELECT state FROM jobs WHERE id=?", (job_id,))["state"] == "DONE"
+    entries = client.get(f"/api/v1/jobs/{job_id}/files", headers=alice["headers"]).json()
+    assert entries == [{"path": "result.txt", "size": 3, "sha256": DIGEST}]

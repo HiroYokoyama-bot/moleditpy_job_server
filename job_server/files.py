@@ -147,8 +147,15 @@ def disk_usage(root):
     return total
 
 
-def manifest(root):
-    result = []
+def _listed(root):
+    """(relative path, path, stat) for every file a job folder lists, in order.
+
+    Only ordinary, singly-linked files inside the folder itself: the same
+    set the download endpoints will serve.
+    """
+    from .errors import ServerError
+
+    found = []
     for directory, dirs, names in os.walk(root, followlinks=False):
         dirs[:] = [name for name in dirs if not is_link(Path(directory) / name)]
         for name in names:
@@ -156,12 +163,46 @@ def manifest(root):
             relative = path.relative_to(root).as_posix()
             if any(part.casefold() in RESERVED for part in relative.split("/")):
                 continue
-            from .errors import ServerError
-
             try:
-                info = contained(root, relative).stat()
+                path = contained(root, relative)
+                info = path.stat()
             except (ServerError, OSError):
                 continue
             if stat.S_ISREG(info.st_mode) and info.st_nlink == 1:
-                result.append({"path": relative, "size": info.st_size})
-    return sorted(result, key=lambda item: item["path"])
+                found.append((relative, path, info))
+    return sorted(found, key=lambda item: item[0])
+
+
+def manifest_stamp(root):
+    """A folder's listed files as (path, size, mtime) rows: a cheap stat-only
+    fingerprint that changes whenever a listed file is added, removed or
+    rewritten, so a stored manifest can be told apart from a stale one."""
+    return [[relative, info.st_size, info.st_mtime_ns] for relative, _path, info in _listed(root)]
+
+
+def manifest_record(root, previous=None):
+    """A folder's manifest with digests, plus its stamp, in one walk.
+
+    A file unchanged since the previous record (same size and mtime) keeps
+    its digest, so refreshing a growing job folder only reads the files
+    that were added or rewritten since the last record.
+    """
+    from .errors import ServerError
+
+    known = {}
+    if previous:
+        for row, entry in zip(previous["stamp"], previous["entries"]):
+            known[row[0]] = (row[1], row[2], entry["sha256"])
+    entries, stamp = [], []
+    for relative, path, info in _listed(root):
+        prior = known.get(relative)
+        if prior and prior[0] == info.st_size and prior[1] == info.st_mtime_ns:
+            digest = prior[2]
+        else:
+            try:
+                digest = sha256(path)
+            except (ServerError, OSError):
+                continue
+        entries.append({"path": relative, "size": info.st_size, "sha256": digest})
+        stamp.append([relative, info.st_size, info.st_mtime_ns])
+    return {"entries": entries, "stamp": stamp}

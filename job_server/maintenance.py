@@ -18,7 +18,7 @@ import time
 from pathlib import Path
 
 from .auth import DELETED_ROLE
-from .files import DEVICES, disk_usage, is_link
+from .files import DEVICES, disk_usage, is_link, manifest_record
 from .jobs import TERMINAL, work_directory
 
 #: Seconds between maintenance passes.
@@ -109,6 +109,7 @@ class Maintenance:
         steps = (
             self.measure_running,
             self.measure_finished,
+            self.store_manifests,
             self.relocate_finished,
             self.backup_if_due,
             self.archive_events,
@@ -165,6 +166,28 @@ class Maintenance:
             # The stamp is floored at the job's end, so "measured after it
             # ended" holds by construction and the job is never picked again.
             self._measure(job, floor=job["ended_at"] or 0.0)
+
+    def store_manifests(self):
+        # Jobs whose end the dispatcher did not record a result list for —
+        # ended before it was stored, or by an administrator's mark-lost —
+        # get theirs here, once; the stored list is then served as-is.
+        rows = self.db.rows(
+            "SELECT * FROM jobs WHERE state IN ('DONE','FAILED','CANCELLED','LOST') "
+            "AND manifest IS NULL ORDER BY ended_at,id LIMIT 100"
+        )
+        for job in rows:
+            if self.stop_event.is_set():
+                return
+            folder = work_directory(
+                self.settings, job["work_root"], job["id"],
+                archive_path=job["archive_path"],
+            )
+            record = manifest_record(folder)
+            with self.db.transaction() as c:
+                c.execute(
+                    "UPDATE jobs SET manifest=? WHERE id=?",
+                    (json.dumps(record), job["id"]),
+                )
 
     def relocate_finished(self):
         if not self.settings.finished_dir:
