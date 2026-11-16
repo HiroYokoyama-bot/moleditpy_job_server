@@ -380,9 +380,9 @@ async function refresh() {
       const name=cell(row,job.spec.name,'job-name');
       const id=document.createElement('small');id.className='job-id';id.textContent=(admin?(state.names[job.owner_id]||'(deleted user)')+' · ':'')+job.id;name.append(id);
       const status=cell(row,'');const badge=document.createElement('span');badge.className='badge '+job.display_state.toLowerCase();badge.textContent=job.display_state;status.append(badge);const priority=document.createElement('small');priority.className='job-id';priority.textContent='Priority '+(job.priority??0)+(job.force_run?' · Force requested':'')+(typeof job.queue_ahead==='number'?' · '+ahead(job.queue_ahead):'');status.append(priority);
-      cell(row,cores(job.spec.resources.cpus_per_task)+' · '+gb(job.spec.resources.memory_mb)+' GiB');cell(row,date(job.created_at));button(cell(row,''),'Open',()=>detail(job.id));rows.push(row);
+      cell(row,cores(job.spec.resources.cpus_per_task)+' · '+gb(job.spec.resources.memory_mb)+' GiB');cell(row,size(job.disk_bytes));cell(row,date(job.created_at));button(cell(row,''),'Open',()=>detail(job.id));rows.push(row);
     }
-    if(!jobs.length){const row=document.createElement('tr');const empty=cell(row,'No jobs on this page.','empty');empty.colSpan=5;rows.push(row);}
+    if(!jobs.length){const row=document.createElement('tr');const empty=cell(row,'No jobs on this page.','empty');empty.colSpan=6;rows.push(row);}
     return rows;});
     filterJobs();
     $('#previous-page').disabled=state.page===0;$('#next-page').disabled=jobs.length<50;$('#page-number').textContent='Page '+(state.page+1);

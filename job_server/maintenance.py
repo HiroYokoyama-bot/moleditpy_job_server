@@ -18,7 +18,7 @@ import time
 from pathlib import Path
 
 from .auth import DELETED_ROLE
-from .files import DEVICES, is_link
+from .files import DEVICES, disk_usage, is_link
 from .jobs import TERMINAL, work_directory
 
 #: Seconds between maintenance passes.
@@ -102,13 +102,35 @@ class Maintenance:
             self.stop_event.wait(INTERVAL)
 
     def run_once(self):
-        for step in (self.relocate_finished, self.backup_if_due, self.archive_events):
+        for step in (self.measure_finished, self.relocate_finished, self.backup_if_due, self.archive_events):
             try:
                 step()
             except Exception:
                 logging.exception("Maintenance step failed")
 
     # Finished jobs -------------------------------------------------------
+
+    def measure_finished(self):
+        # An ended job's folder no longer changes, so its size is measured
+        # once here and kept on the job's row for the job lists, instead of
+        # walking folders again on every list request.
+        rows = self.db.rows(
+            "SELECT * FROM jobs WHERE state IN ('DONE','FAILED','CANCELLED','LOST') "
+            "AND disk_bytes IS NULL ORDER BY ended_at,id LIMIT 100"
+        )
+        for job in rows:
+            if self.stop_event.is_set():
+                return
+            folder = work_directory(
+                self.settings, job["work_root"], job["id"],
+                archive_path=job["archive_path"],
+            )
+            measured = disk_usage(folder)
+            with self.db.transaction() as c:
+                c.execute(
+                    "UPDATE jobs SET disk_bytes=? WHERE id=? AND disk_bytes IS NULL",
+                    (measured, job["id"]),
+                )
 
     def relocate_finished(self):
         if not self.settings.finished_dir:

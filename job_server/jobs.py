@@ -157,6 +157,20 @@ class Jobs:
             result["display_state"] = result["state"]
         if result["state"] == "PENDING":
             result["queue_ahead"] = self.queue_ahead(job)
+        # What the job takes on disk, for the job lists. An ended job's
+        # folder no longer changes, so maintenance measures it once and
+        # keeps the total on the row; until then, and for jobs still
+        # waiting or running, the uploaded inputs are what is known —
+        # their sizes are already recorded, so this costs no extra I/O.
+        if result["state"] in TERMINAL and job.get("disk_bytes") is not None:
+            result["disk_bytes"] = job["disk_bytes"]
+        else:
+            row = self.db.one(
+                "SELECT COALESCE(SUM(size),0) AS total FROM job_files "
+                "WHERE job_id=? AND complete=1",
+                (result["id"],),
+            )
+            result["disk_bytes"] = row["total"]
         result.pop("username", None)
         return result
 

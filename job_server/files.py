@@ -126,6 +126,27 @@ def sha256(path):
     return digest.hexdigest()
 
 
+def disk_usage(root):
+    """Total size of the regular files under a folder, in bytes.
+
+    Stat-only (no file is opened or read), links are not followed, and a
+    file that vanishes mid-walk is skipped: this runs on folders other
+    processes may still be writing.
+    """
+    total = 0
+    for directory, dirs, names in os.walk(root, followlinks=False):
+        dirs[:] = [name for name in dirs if not is_link(Path(directory) / name)]
+        for name in names:
+            path = Path(directory) / name
+            if is_link(path):
+                continue
+            try:
+                total += path.stat().st_size
+            except OSError:
+                continue
+    return total
+
+
 def manifest(root):
     result = []
     for directory, dirs, names in os.walk(root, followlinks=False):

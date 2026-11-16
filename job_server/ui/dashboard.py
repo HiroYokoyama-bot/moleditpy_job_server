@@ -52,7 +52,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..client import ClientError, JobServerClient
-from .units import MB_PER_GB, GBSpinBox, FocusSpinBox, gb
+from .units import MB_PER_GB, GBSpinBox, FocusSpinBox, byte_size, gb
 from .network import LanAddressList
 from ..settings import Settings, pc_description, pc_resources, pc_size_label
 
@@ -409,16 +409,16 @@ class Dashboard(QDialog):
         self.newer_jobs.setEnabled(False)
         self.older_jobs.setEnabled(False)
         layout.addLayout(filters)
-        self.jobs = QTableWidget(0, 8)
+        self.jobs = QTableWidget(0, 9)
         self.jobs.setHorizontalHeaderLabels(
-            ["Name", "Owner", "State", "Priority", "Reserved", "Elapsed", "Job ID", "Submitted (local)"]
+            ["Name", "Owner", "State", "Priority", "Reserved", "Disk", "Elapsed", "Job ID", "Submitted (local)"]
         )
         self.jobs.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.jobs.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.jobs.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.jobs.verticalHeader().setVisible(False)
         self.jobs.verticalHeader().setDefaultSectionSize(34)
-        self._table_layout(self.jobs, (220, 110, 110, 70, 130, 90, 270, 170))
+        self._table_layout(self.jobs, (220, 110, 110, 70, 130, 90, 90, 270, 170))
         self.jobs.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self.jobs.setShowGrid(False)
         self.jobs.itemSelectionChanged.connect(self._update_job_actions)
@@ -647,8 +647,10 @@ class Dashboard(QDialog):
         about_help = QLabel(
             "Your note about this PC, shown with the server status — in this window, "
             "the web monitor, client apps and the API — after the fixed line "
-            f"“{pc_description()}”. Write it for the people and AI agents who will "
-            "use this PC: what it is for, and how to share it."
+            f"“{pc_description()}”. It is answered before sign-in, so anyone who can "
+            "reach this server can read it: write it for the people and AI agents "
+            "who will use this PC — what it is for, and how to share it — and keep "
+            "private details out of it."
         )
         about_help.setWordWrap(True)
         about_form.addRow(about_help)
@@ -1059,7 +1061,8 @@ class Dashboard(QDialog):
                     (j["spec"]["name"], usernames.get(j["owner_id"], "(deleted user)"),
                      j["display_state"] + (" · force requested" if j.get("force_run") else "")
                      + (" · needs recheck" if self._stuck(j) else ""),
-                     j.get("priority", 0), reserved_text(j), elapsed_text(j, now), j["id"],
+                     j.get("priority", 0), reserved_text(j), byte_size(j.get("disk_bytes")),
+                     elapsed_text(j, now), j["id"],
                      self.timestamp(j.get("created_at")))
                     for j in data["jobs"]
                 ], identifiers=[j["id"] for j in data["jobs"]],

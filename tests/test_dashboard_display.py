@@ -233,7 +233,8 @@ def test_refresh_displays_names_status_and_local_access_time(dashboard, monkeypa
     assert dashboard.selected(dashboard.jobs) == "job-id"
     assert dashboard.jobs.item(0, 0).text() == "test"
     assert dashboard.jobs.item(0, 4).text() == "—"  # This reply carries no resources.
-    assert dashboard.jobs.item(0, 6).text() == "job-id"
+    assert dashboard.jobs.item(0, 5).text() == "—"  # Nor a disk size.
+    assert dashboard.jobs.item(0, 7).text() == "job-id"
     assert dashboard.users.item(0, 0).text() == "alice"
     assert dashboard.users.item(0, 2).text() == "Enabled"
     assert dashboard.devices.item(0, 1).text() == "alice"

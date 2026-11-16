@@ -150,7 +150,10 @@ window to the front instead of opening another.
 Status answers (`status`, the web monitor, the API) name the PC they came
 from: its hostname, a fixed line — "<PC>'s job server running on <OS>" — and
 the owner's own description of the PC when one is set, in the window's
-Settings tab or with `init --description`.
+Settings tab or with `init --description`. The name and description are
+answered before sign-in, so a client can tell which PC it reached: anyone
+who can reach the server can read them, so keep private details out of the
+description.
 
 ## Python client
 
