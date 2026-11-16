@@ -1,4 +1,5 @@
 import hashlib
+import json
 import os
 import re
 import stat
@@ -184,35 +185,64 @@ def listing(root):
 
 
 def manifest_stamp(root):
-    """A folder's listed files as (path, size, mtime) rows: a cheap stat-only
-    fingerprint that changes whenever a listed file is added, removed or
-    rewritten, so a stored manifest can be told apart from a stale one."""
-    return [[relative, info.st_size, info.st_mtime_ns] for relative, _path, info in _listed(root)]
+    """A folder's listed files as (path, size, mtime, ctime) rows: a cheap
+    stat-only fingerprint of the folder's contents. The ctime is in the
+    fingerprint because it cannot be set by hand — a rewrite that restores
+    the old mtime still moves it — so the fingerprint changes whenever a
+    listed file is added, removed or rewritten, and a stored manifest can
+    be told apart from a stale one."""
+    return [
+        [relative, info.st_size, info.st_mtime_ns, info.st_ctime_ns]
+        for relative, _path, info in _listed(root)
+    ]
+
+
+def parse_manifest(text):
+    """A stored manifest record, or None when the stored value is missing
+    or not a record this build can read: an unreadable record counts as
+    no record, so the next listing recomputes and replaces it."""
+    if not text:
+        return None
+    try:
+        record = json.loads(text)
+        if not isinstance(record["entries"], list) or not isinstance(record["stamp"], list):
+            return None
+    except (ValueError, TypeError, KeyError):
+        return None
+    return record
 
 
 def manifest_record(root, previous=None):
     """A folder's manifest with digests, plus its stamp, in one walk.
 
-    A file unchanged since the previous record (same size and mtime) keeps
-    its digest, so refreshing a growing job folder only reads the files
-    that were added or rewritten since the last record.
+    A file unchanged since the previous record (same stamp row) keeps its
+    digest, so refreshing a growing job folder only reads the files that
+    were added or rewritten since the last record.
     """
     from .errors import ServerError
 
     known = {}
     if previous:
-        for row, entry in zip(previous["stamp"], previous["entries"]):
-            known[row[0]] = (row[1], row[2], entry["sha256"])
+        try:
+            digests = {entry["path"]: entry["sha256"] for entry in previous["entries"]}
+            known = {
+                row[0]: (tuple(row), digests[row[0]])
+                for row in previous["stamp"]
+                if row[0] in digests
+            }
+        except (TypeError, KeyError):
+            known = {}
     entries, stamp = [], []
     for relative, path, info in _listed(root):
+        row = [relative, info.st_size, info.st_mtime_ns, info.st_ctime_ns]
         prior = known.get(relative)
-        if prior and prior[0] == info.st_size and prior[1] == info.st_mtime_ns:
-            digest = prior[2]
+        if prior and prior[0] == tuple(row):
+            digest = prior[1]
         else:
             try:
                 digest = sha256(path)
             except (ServerError, OSError):
                 continue
         entries.append({"path": relative, "size": info.st_size, "sha256": digest})
-        stamp.append([relative, info.st_size, info.st_mtime_ns])
+        stamp.append(row)
     return {"entries": entries, "stamp": stamp}

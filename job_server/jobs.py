@@ -8,7 +8,7 @@ from pathlib import Path
 
 from .errors import reject
 from .auth import Auth
-from .files import contained, listing, manifest_record, manifest_stamp, open_regular, sha256
+from .files import contained, listing, manifest_record, manifest_stamp, open_regular, parse_manifest, sha256
 
 TERMINAL = {"DONE", "FAILED", "CANCELLED", "LOST"}
 #: The order the dispatcher takes waiting jobs in (force_run DESC, priority
@@ -135,7 +135,7 @@ class Jobs:
 
     def public(self, job):
         result = {k: v for k, v in job.items() if k not in {
-            "work_root", "archive_path", "relocate", "pid", "process_started", "force_actor"
+            "work_root", "archive_path", "relocate", "pid", "process_started", "force_actor", "manifest"
         }}
         result["force_run"] = bool(result["force_run"])
         result["held"] = bool(result.get("held", 0))
@@ -387,12 +387,13 @@ class Jobs:
         # listing nobody recorded — the record is refreshed, reusing the
         # digests of the files that did not change, and stored again. A
         # listing therefore reads only what changed since the last one.
-        stored = json.loads(job["manifest"]) if job["manifest"] else None
+        stored = parse_manifest(job["manifest"])
         if stored and stored["stamp"] == manifest_stamp(folder):
             return stored["entries"]
         record = manifest_record(folder, stored)
         with self.db.transaction() as c:
             c.execute(
-                "UPDATE jobs SET manifest=? WHERE id=?", (json.dumps(record), job_id)
+                "UPDATE jobs SET manifest=? WHERE id=? AND manifest IS ?",
+                (json.dumps(record), job_id, job["manifest"]),
             )
         return record["entries"]

@@ -5,6 +5,7 @@ import json
 import time
 
 from job_server.db import Database
+from job_server.files import parse_manifest
 from job_server.jobs import Jobs
 from job_server.maintenance import Maintenance
 from job_server.settings import Settings
@@ -103,6 +104,74 @@ def test_the_listing_can_be_read_without_digests(client, alice):
     assert row["manifest"] is None, "Reading without digests records nothing"
     entries = client.get(f"/api/v1/jobs/{job_id}/files", headers=alice["headers"]).json()
     assert entries == [{"path": "result.txt", "size": 3, "sha256": DIGEST}]
+
+
+def test_a_rewrite_that_restores_the_mtime_still_gets_a_new_digest(client, alice):
+    import hashlib
+    import os
+
+    job_id = reserve(client, alice).json()["id"]
+    client.post(f"/api/v1/jobs/{job_id}/commit", headers=alice["headers"])
+    work = client.app.state.jobs.directory(job_id)
+    target = work / "result.txt"
+    target.write_bytes(b"abc")
+    entries = client.get(f"/api/v1/jobs/{job_id}/files", headers=alice["headers"]).json()
+    assert entries[0]["sha256"] == DIGEST
+    before = target.stat()
+    target.write_bytes(b"xyz")
+    os.utime(target, ns=(before.st_atime_ns, before.st_mtime_ns))
+    entries = client.get(f"/api/v1/jobs/{job_id}/files", headers=alice["headers"]).json()
+    assert entries[0]["sha256"] == hashlib.sha256(b"xyz").hexdigest()
+
+
+def test_a_stored_manifest_is_not_part_of_the_public_job(client, alice):
+    job_id = reserve(client, alice).json()["id"]
+    client.post(f"/api/v1/jobs/{job_id}/commit", headers=alice["headers"])
+    work = client.app.state.jobs.directory(job_id)
+    (work / "result.txt").write_bytes(b"abc")
+    client.get(f"/api/v1/jobs/{job_id}/files", headers=alice["headers"])
+    shown = client.get(f"/api/v1/jobs/{job_id}", headers=alice["headers"]).json()
+    assert "manifest" not in shown
+    listed = client.get("/api/v1/jobs", headers=alice["headers"]).json()
+    assert all("manifest" not in job for job in listed)
+
+
+def test_an_unreadable_stored_manifest_is_recomputed(client, alice):
+    job_id = reserve(client, alice).json()["id"]
+    client.post(f"/api/v1/jobs/{job_id}/commit", headers=alice["headers"])
+    work = client.app.state.jobs.directory(job_id)
+    (work / "result.txt").write_bytes(b"abc")
+    db = client.app.state.db
+    with db.transaction() as c:
+        c.execute("UPDATE jobs SET manifest='not json' WHERE id=?", (job_id,))
+    entries = client.get(f"/api/v1/jobs/{job_id}/files", headers=alice["headers"]).json()
+    assert entries == [{"path": "result.txt", "size": 3, "sha256": DIGEST}]
+    row = db.one("SELECT manifest FROM jobs WHERE id=?", (job_id,))
+    assert parse_manifest(row["manifest"]) is not None
+
+
+def test_a_second_listing_reads_no_file_again(client, alice, monkeypatch):
+    from job_server import files
+
+    job_id = reserve(client, alice).json()["id"]
+    client.post(f"/api/v1/jobs/{job_id}/commit", headers=alice["headers"])
+    work = client.app.state.jobs.directory(job_id)
+    (work / "a.txt").write_bytes(b"abc")
+    reads = []
+    real = files.sha256
+
+    def counting(path):
+        reads.append(path)
+        return real(path)
+
+    monkeypatch.setattr(files, "sha256", counting)
+    client.get(f"/api/v1/jobs/{job_id}/files", headers=alice["headers"])
+    assert len(reads) == 1
+    client.get(f"/api/v1/jobs/{job_id}/files", headers=alice["headers"])
+    assert len(reads) == 1, "The stored record is served without reading again"
+    (work / "b.txt").write_bytes(b"abc")
+    client.get(f"/api/v1/jobs/{job_id}/files", headers=alice["headers"])
+    assert len(reads) == 2, "Only the added file is read"
 
 
 def test_a_recorded_end_stores_the_result_list_with_it(client, alice):

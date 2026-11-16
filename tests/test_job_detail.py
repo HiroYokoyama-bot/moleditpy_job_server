@@ -19,6 +19,7 @@ def details(tmp_path, monkeypatch):
     dialog = JobDetailDialog(dashboard)
     queued = []
     monkeypatch.setattr(dialog.pool, "start", queued.append)
+    monkeypatch.setattr(dialog.digest_pool, "start", queued.append)
     yield dashboard, dialog, queued, app
     for task in tuple(dialog._tasks):
         task.run()

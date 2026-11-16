@@ -185,7 +185,7 @@ class Maintenance:
             record = manifest_record(folder)
             with self.db.transaction() as c:
                 c.execute(
-                    "UPDATE jobs SET manifest=? WHERE id=?",
+                    "UPDATE jobs SET manifest=? WHERE id=? AND manifest IS NULL",
                     (json.dumps(record), job["id"]),
                 )
 

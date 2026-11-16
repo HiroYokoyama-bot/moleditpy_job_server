@@ -24,6 +24,10 @@ class JobDetailDialog(QDialog):
         self.resize(800, 610)
         self.pool = QThreadPool(self)
         self.pool.setMaxThreadCount(1)
+        # Digests load on their own pool: a slow digest fetch must not
+        # queue ahead of the next refresh on the single refresh thread.
+        self.digest_pool = QThreadPool(self)
+        self.digest_pool.setMaxThreadCount(1)
         self._tasks = set()
         self.generation = 0
         self.job_id = None
@@ -218,7 +222,7 @@ class JobDetailDialog(QDialog):
         cleanup = (task.signals.finished, task.signals.failed)
         connect_queued(task.signals.finished, finished, self, (object,), cleanup=cleanup)
         connect_queued(task.signals.failed, failed, self, (str,), cleanup=cleanup)
-        self.pool.start(task)
+        self.digest_pool.start(task)
 
     def _show_log(self, text):
         """Replace the log, following its end only if the reader was already there."""

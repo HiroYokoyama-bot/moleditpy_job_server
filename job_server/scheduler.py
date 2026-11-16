@@ -9,7 +9,7 @@ from pathlib import Path
 
 import psutil
 
-from .files import manifest_record
+from .files import manifest_record, parse_manifest
 from .jobs import PENDING_IN_ORDER, TERMINAL, work_directory
 from .history import ResourceHistory
 from .maintenance import Maintenance
@@ -112,7 +112,7 @@ class Scheduler:
                 # serving it later never reads the folder again. A folder
                 # that cannot be read leaves it to maintenance's next pass.
                 try:
-                    previous = json.loads(job["manifest"]) if job["manifest"] else None
+                    previous = parse_manifest(job["manifest"])
                     stored = json.dumps(manifest_record(work_directory(
                         self.settings, job["work_root"], job["id"],
                         archive_path=job["archive_path"],
