@@ -121,10 +121,12 @@ def test_a_job_that_ends_during_its_measurement_is_measured_once_more(tmp_path, 
     def ending_walk(path):
         total = real(path)
         (folder / "final.out").write_bytes(b"f" * 5)
+        # The end is stamped a beat after the walk began, not at the wall
+        # clock's mercy: on Windows one clock tick can span the whole walk.
         with db.transaction() as c:
             c.execute(
                 "UPDATE jobs SET state='DONE',ended_at=? WHERE id='job1'",
-                (time.time(),),
+                (time.time() + 1,),
             )
         return total
 
