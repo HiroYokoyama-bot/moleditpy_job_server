@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=Job Server
+Type=Application
+Path=/home/user
+Comment=MoleditPy Job Server
+Terminal=false
+Icon=/home/user/.moleditpy/plugins/job_server/web/icon.png
+Exec=sh -c "cd /home/user/.moleditpy/plugins; python3 -m job_server gui"
