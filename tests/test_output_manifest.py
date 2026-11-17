@@ -185,9 +185,9 @@ def test_a_second_listing_reads_no_file_again(client, alice, monkeypatch):
     reads = []
     real = files.sha256
 
-    def counting(path):
+    def counting(path, stop=None):
         reads.append(path)
-        return real(path)
+        return real(path, stop)
 
     monkeypatch.setattr(files, "sha256", counting)
     client.get(f"/api/v1/jobs/{job_id}/files", headers=alice["headers"])
@@ -199,7 +199,7 @@ def test_a_second_listing_reads_no_file_again(client, alice, monkeypatch):
     assert len(reads) == 2, "Only the added file is read"
 
 
-def test_a_recorded_end_stores_the_result_list_with_it(client, alice):
+def test_a_recorded_end_hashes_nothing_in_the_dispatcher(client, alice, monkeypatch):
     job_id = reserve(client, alice).json()["id"]
     client.post(f"/api/v1/jobs/{job_id}/commit", headers=alice["headers"])
     db = client.app.state.db
@@ -210,12 +210,56 @@ def test_a_recorded_end_stores_the_result_list_with_it(client, alice):
         )
     work = client.app.state.jobs.directory(job_id)
     (work / "result.txt").write_bytes(b"abc")
+    # A list recorded while the job ran is not the final one.
+    client.get(f"/api/v1/jobs/{job_id}/files", headers=alice["headers"])
+    assert db.one("SELECT manifest FROM jobs WHERE id=?", (job_id,))["manifest"]
+    (work / "result.txt").write_bytes(b"abc, final")
     control = client.app.state.settings.root / "control" / job_id
     control.mkdir(parents=True, exist_ok=True)
     (control / "done.json").write_text(json.dumps({
         "state": "DONE", "reason": "", "exit_code": 0, "ended_at": time.time(),
     }))
+    import job_server.files as files
+
+    def no_hashing(*_args, **_kwargs):
+        raise AssertionError("The dispatcher must not hash job output")
+
+    monkeypatch.setattr(files, "sha256", no_hashing)
     client.app.state.scheduler.reconcile()
-    assert db.one("SELECT state FROM jobs WHERE id=?", (job_id,))["state"] == "DONE"
+    row = db.one("SELECT state,manifest FROM jobs WHERE id=?", (job_id,))
+    assert row["state"] == "DONE"
+    assert row["manifest"] is None, "The running list is cleared for maintenance"
+    monkeypatch.undo()
+    scheduler = client.app.state.scheduler
+    scheduler.maintenance.store_manifests()
     entries = client.get(f"/api/v1/jobs/{job_id}/files", headers=alice["headers"]).json()
-    assert entries == [{"path": "result.txt", "size": 3, "sha256": DIGEST}]
+    assert entries == [{
+        "path": "result.txt", "size": 10,
+        "sha256": hashlib.sha256(b"abc, final").hexdigest(),
+    }]
+
+
+def test_a_stopping_server_abandons_a_result_list_mid_file(tmp_path):
+    settings, db, jobs = _stack(tmp_path, "DONE", ended_at=2.0)
+    (jobs.directory("job1") / "big.bin").write_bytes(b"x" * (3 * 1024 * 1024))
+    maintenance = Maintenance(db, jobs, settings)
+    reads = []
+
+    def stop():
+        reads.append(1)
+        return len(reads) > 1  # The stop arrives after the first 1 MiB read.
+
+    maintenance.stop_event.is_set = stop
+    maintenance.store_manifests()
+    assert db.one("SELECT manifest FROM jobs WHERE id='job1'")["manifest"] is None
+
+
+def test_result_lists_are_stored_after_moves_and_backups(tmp_path):
+    settings, db, jobs = _stack(tmp_path, "DONE", ended_at=2.0)
+    maintenance = Maintenance(db, jobs, settings)
+    order = []
+    for name in ("measure_running", "measure_finished", "relocate_finished",
+                 "backup_if_due", "archive_events", "store_manifests"):
+        setattr(maintenance, name, lambda name=name: order.append(name))
+    maintenance.run_once()
+    assert order[-1] == "store_manifests"
