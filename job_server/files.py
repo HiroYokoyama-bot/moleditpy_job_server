@@ -119,10 +119,18 @@ def open_regular(path, mode="rb"):
     return os.fdopen(descriptor, mode)
 
 
-def sha256(path):
+class HashingStopped(Exception):
+    """A digest was abandoned because its caller is stopping."""
+
+
+def sha256(path, stop=None):
+    """The file's SHA-256. ``stop``, when given, is asked between 1 MiB
+    reads, so a background caller can give up on a large file at once."""
     digest = hashlib.sha256()
     with open_regular(path) as stream:
         while chunk := stream.read(1024 * 1024):
+            if stop is not None and stop():
+                raise HashingStopped
             digest.update(chunk)
     return digest.hexdigest()
 
@@ -215,12 +223,14 @@ def parse_manifest(text):
     return record
 
 
-def manifest_record(root, previous=None):
+def manifest_record(root, previous=None, stop=None):
     """A folder's manifest with digests, plus its stamp, in one walk.
 
     A file unchanged since the previous record (same stamp row) keeps its
     digest, so refreshing a growing job folder only reads the files that
-    were added or rewritten since the last record.
+    were added or rewritten since the last record. ``stop`` is passed to
+    :func:`sha256`; when it fires, :class:`HashingStopped` propagates and
+    nothing is returned.
     """
     from .errors import ServerError
 
@@ -243,7 +253,7 @@ def manifest_record(root, previous=None):
             digest = prior[1]
         else:
             try:
-                digest = sha256(path)
+                digest = sha256(path, stop)
             except (ServerError, OSError):
                 continue
         entries.append({"path": relative, "size": info.st_size, "sha256": digest})

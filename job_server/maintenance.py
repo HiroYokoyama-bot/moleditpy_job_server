@@ -18,7 +18,7 @@ import time
 from pathlib import Path
 
 from .auth import DELETED_ROLE
-from .files import DEVICES, disk_usage, is_link, manifest_record
+from .files import DEVICES, HashingStopped, disk_usage, is_link, manifest_record
 from .jobs import TERMINAL, work_directory
 
 #: Seconds between maintenance passes.
@@ -109,10 +109,11 @@ class Maintenance:
         steps = (
             self.measure_running,
             self.measure_finished,
-            self.store_manifests,
             self.relocate_finished,
             self.backup_if_due,
             self.archive_events,
+            # Last: hashing large outputs must not hold up moves and backups.
+            self.store_manifests,
         )
         for step in steps:
             try:
@@ -172,9 +173,10 @@ class Maintenance:
             self._measure(job, floor=job["ended_at"] or 0.0)
 
     def store_manifests(self):
-        # Jobs whose end the dispatcher did not record a result list for —
-        # ended before it was stored, or by an administrator's mark-lost —
-        # get theirs here, once; the stored list is then served as-is.
+        # Every ended job gets its result list here, once: the dispatcher
+        # clears any list recorded while the job ran and never hashes, so
+        # a large output cannot hold up dispatch. The stored list is then
+        # served as-is. Hashing stops within one read when the server does.
         rows = self.db.rows(
             "SELECT * FROM jobs WHERE state IN ('DONE','FAILED','CANCELLED','LOST') "
             "AND manifest IS NULL ORDER BY ended_at,id LIMIT 100"
@@ -186,7 +188,10 @@ class Maintenance:
                 self.settings, job["work_root"], job["id"],
                 archive_path=job["archive_path"],
             )
-            record = manifest_record(folder)
+            try:
+                record = manifest_record(folder, stop=self.stop_event.is_set)
+            except HashingStopped:
+                return  # Stopping: the job keeps no list and is picked up next start.
             with self.db.transaction() as c:
                 c.execute(
                     "UPDATE jobs SET manifest=? WHERE id=? AND manifest IS NULL",
