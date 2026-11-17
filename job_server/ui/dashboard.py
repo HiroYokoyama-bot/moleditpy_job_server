@@ -51,6 +51,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from .. import PLUGIN_VERSION
 from ..client import ClientError, JobServerClient
 from .units import MB_PER_GB, GBSpinBox, FocusSpinBox, byte_size, gb
 from .network import LanAddressList
@@ -158,7 +159,7 @@ FILE_MANAGER = "File Explorer" if os.name == "nt" else "the file manager"
 class Dashboard(QDialog):
     def __init__(self, parent=None, config=None):
         super().__init__(parent)
-        self.setWindowTitle("Job Server")
+        self.setWindowTitle(f"Job Server v{PLUGIN_VERSION}")
         self.setWindowIcon(QIcon(str(Path(__file__).resolve().parents[1] / "web" / "icon.png")))
         self.resize(1000, 780)
         # A control panel, not a question: it stays open beside MoleditPy
@@ -285,6 +286,8 @@ class Dashboard(QDialog):
         self.unforce_action = action(queue, "Cancel force-run request", lambda: self.force_run(False))
         self.cancel_action = action(queue, "Cancel selected job...", self.cancel)
         self.lost_action = action(queue, "Mark stuck job as lost...", self.mark_lost)
+        help_menu = self.menu_bar.addMenu("Help")
+        action(help_menu, "About Job Server...", self.show_about)
 
     def toggle_fullscreen(self):
         """Full screen and back (View menu or F11; Esc leaves full screen)."""
@@ -317,6 +320,36 @@ class Dashboard(QDialog):
         directory = self.settings.root / "logs"
         directory.mkdir(parents=True, exist_ok=True)
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(directory)))
+
+    def show_about(self):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("About Job Server")
+        layout = QVBoxLayout(dialog)
+        icon = QLabel()
+        icon.setPixmap(self.windowIcon().pixmap(64, 64))
+        icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(icon)
+        title = QLabel(f"Job Server v{PLUGIN_VERSION}")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        font = title.font()
+        font.setBold(True)
+        title.setFont(font)
+        layout.addWidget(title)
+        about = QLabel("Runs queued calculations on this PC for MoleditPy Job Manager clients.")
+        about.setWordWrap(True)
+        about.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(about)
+        link = QLabel(
+            '<a href="https://github.com/HiroYokoyama/moleditpy_job_server">'
+            "github.com/HiroYokoyama/moleditpy_job_server</a>"
+        )
+        link.setOpenExternalLinks(True)
+        link.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(link)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close, parent=dialog)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+        dialog.exec()
 
     def _dashboard(self):
         page = QWidget()
@@ -369,7 +402,10 @@ class Dashboard(QDialog):
             metrics.addWidget(card, index // 3, index % 3)
         layout.addLayout(metrics)
         under = QHBoxLayout()
-        note = QLabel("Point at a line to read its value. Gaps are times the server was not running.")
+        note = QLabel(
+            "Point at a line to read its value. Gaps are times the server was not running. "
+            "CPU and memory reservations are advisory."
+        )
         note.setEnabled(False)
         under.addWidget(note, 1)
         # The span the lines cover; the server keeps the longest, so switching is instant.
@@ -999,7 +1035,7 @@ class Dashboard(QDialog):
                 self._clear_dashboard()
                 return
             version = data["health"]["server_version"]
-            self.message.setText(f"Running at {self.client.url} — {version}")
+            self.message.clear()
             if "resources" not in data:
                 self._clear_dashboard()
                 if "error" in data:
@@ -1025,7 +1061,7 @@ class Dashboard(QDialog):
             else:
                 self.set_status(
                     "online", "Server online — accepting jobs",
-                    "CPU and memory reservations are advisory.", version,
+                    "", version,
                 )
             for key in ("running", "pending"):
                 self.metric_values[key].setText(str(resource.get(key, "—")))

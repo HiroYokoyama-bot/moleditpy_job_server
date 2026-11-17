@@ -387,7 +387,7 @@ async function refresh() {
     }
     renderList($('#jobs-body'),jobs.map(job=>[job.id,job.spec.name,admin?state.names[job.owner_id]||null:null,job.display_state,job.priority,job.force_run,job.queue_ahead,job.spec.resources.cpus_per_task,job.spec.resources.memory_mb,job.created_at]),()=>{const rows=[];
     for(const job of jobs){
-      const row=document.createElement('tr');row.className='clickable';row.dataset.state=job.state;
+      const row=document.createElement('tr');row.className='clickable';row.dataset.state=job.state;row.dataset.display=job.display_state;
       // The whole row opens the job, unless the click was on a button or ends a text selection.
       row.addEventListener('click',event=>{if(event.target?.closest?.('button')||String(globalThis.getSelection?.()||''))return;safe(()=>detail(job.id));});
       const name=cell(row,job.spec.name,'job-name');
@@ -409,13 +409,17 @@ async function refresh() {
   }
 }
 const STATE_FILTERS={active:['UPLOADING','PENDING','RUNNING'],finished:['DONE','FAILED','CANCELLED','LOST'],problem:['FAILED','CANCELLED','LOST']};
+// The dashboard's "Running and waiting", matched on the displayed state as there.
+const DISPLAY_FILTERS={runningwaiting:['RUNNING','PENDING','QUEUED','BLOCKED','HELD','UPLOADING']};
 function filterJobs() {
   const words=($('#job-filter').value||'').toLowerCase().split(/\s+/).filter(Boolean);
-  const states=STATE_FILTERS[$('#job-state-filter').value||''];
+  const key=$('#job-state-filter').value||'';
+  const states=STATE_FILTERS[key],displays=DISPLAY_FILTERS[key];
   for(const row of $('#jobs-body').children){
     if(!row.dataset?.state){row.hidden=false;continue;}
     const text=(row.textContent||'').toLowerCase();
-    row.hidden=!words.every(word=>text.includes(word))||(states!==undefined&&!states.includes(row.dataset.state));
+    const shown=states!==undefined?states.includes(row.dataset.state):displays!==undefined?displays.includes(row.dataset.display):true;
+    row.hidden=!words.every(word=>text.includes(word))||!shown;
   }
 }
 $('#job-filter').addEventListener('input',filterJobs);

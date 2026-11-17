@@ -461,6 +461,8 @@ async function jobRows() {
   assert.equal(running.hidden,true);assert.equal(failed.hidden,false);
   app.get('#job-state-filter').value='active';app.get('#job-state-filter').listeners.change();
   assert.equal(running.hidden,false);assert.equal(failed.hidden,true);
+  app.get('#job-state-filter').value='runningwaiting';app.get('#job-state-filter').listeners.change();
+  assert.equal(running.hidden,false);assert.equal(failed.hidden,true);
   // A refresh keeps the filter applied.
   records.push({...job('00000000-0000-0000-0000-00000000000c'),state:'DONE',display_state:'DONE'});
   await app.call('refresh')();
