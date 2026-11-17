@@ -151,9 +151,12 @@ Status answers (`status`, the web monitor, the API) name the PC they came
 from: its hostname and a fixed line — "<PC>'s job server running on <OS>".
 The name is answered before sign-in, so a client can tell which PC it
 reached. The owner's own description of the PC, set in the window's
-Settings tab or with `init --description`, is not one of the answers: it
-stays on the server PC, shown in the dashboard's status banner and added
-to the `status` command's output there.
+Settings tab or with `init --description`, rides in `/health` too, so a
+person or an AI agent meeting the server for the first time knows what
+the PC is for; the web monitor shows it on the sign-in screen. `/health`
+is answered before sign-in, so anyone who can reach the server can read
+the note — write it as a note, not a secret. The other status answers do
+not carry it.
 
 ## Python client
 

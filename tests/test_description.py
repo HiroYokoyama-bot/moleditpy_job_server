@@ -97,10 +97,10 @@ def test_description_must_be_one_short_line_of_text(value):
         Settings(description=value).validate()
 
 
-def test_health_names_the_pc_without_the_description(described):
+def test_health_names_the_pc_and_carries_the_description(described):
     answer = described.get("/api/v1/health")
     assert answer.status_code == 200
-    assert "description" not in answer.json()
+    assert answer.json()["description"] == DESCRIPTION
     assert answer.json()["label"] == pc_description()
 
 
@@ -142,5 +142,5 @@ def test_the_fixed_label_names_the_pc_and_its_os():
 
 def test_an_unset_description_still_leaves_the_label_naming_the_pc(client):
     answer = client.get("/api/v1/health").json()
-    assert "description" not in answer
+    assert answer["description"] == ""
     assert answer["label"] == pc_description()

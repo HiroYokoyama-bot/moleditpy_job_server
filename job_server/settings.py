@@ -97,9 +97,11 @@ class Settings:
     tls_port: int = 8767
     python_executable: str = ""
     job_setup_commands: list[str] = field(default_factory=list)
-    #: The owner's own note about this PC. It never leaves this PC: it is
-    #: shown only on this PC itself, in the dashboard's status banner and
-    #: the status command's output, under the fixed line naming the PC.
+    #: The owner's own note about this PC, carried by /health so a
+    #: first-time client or agent knows what the PC is for, and shown on
+    #: this PC itself in the dashboard's status banner. /health is
+    #: answered before sign-in, so anyone who can reach the server can
+    #: read the note.
     description: str = ""
 
     @property
@@ -291,8 +293,8 @@ class Settings:
             raise ValueError("Job setup commands are too long")
 
     def _validate_description(self):
-        # The description is shown only on this PC (the dashboard banner
-        # and the status command), so it stays a single short line of text.
+        # The description rides in /health and the dashboard banner, so
+        # it stays a single short line of text.
         if not isinstance(self.description, str):
             raise ValueError("description must be text")
         if len(self.description) > 500:

@@ -196,8 +196,10 @@ def create_app(settings=None, dispatch=True):
             "server_version": PLUGIN_VERSION,
             "hostname": hostname,
             # Unauthenticated on purpose: `status` and a first-time client
-            # or agent should know what this PC is before signing in.
+            # or agent should know what this PC is and what it is for
+            # before signing in.
             "label": label,
+            "description": settings.description,
         }
 
     @app.get(prefix + "/tls/ca")
