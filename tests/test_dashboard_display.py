@@ -91,13 +91,16 @@ def test_legacy_primary_and_additional_urls_share_one_field(dashboard):
 
 
 def test_account_menu_is_available_on_every_tab(dashboard, monkeypatch):
-    assert dashboard.windowTitle() == "Job Server"
+    from job_server import PLUGIN_VERSION
+
+    assert dashboard.windowTitle() == f"Job Server v{PLUGIN_VERSION}"
     assert [action.text() for action in dashboard.menu_bar.actions()] == [
         "File",
         "Server",
         "View",
         "Account",
         "Queue",
+        "Help",
     ]
     account = dashboard.menu_bar.actions()[3].menu()
     assert account.actions()[0] is dashboard.sign_in_action
@@ -109,6 +112,36 @@ def test_account_menu_is_available_on_every_tab(dashboard, monkeypatch):
     # Every button on the account tab is also in the menu and the right-click menu.
     for entry in (dashboard.add_user_action, dashboard.delete_user_action, dashboard.reset_password_action):
         assert entry in account.actions() and entry in dashboard._context_actions(dashboard.users)
+
+
+def test_trend_note_ends_with_the_advisory(dashboard):
+    from PySide6.QtWidgets import QLabel
+
+    notes = [
+        label.text() for label in dashboard.findChildren(QLabel)
+        if label.text().startswith("Point at a line")
+    ]
+    assert notes == [
+        "Point at a line to read its value. Gaps are times the server was not running. "
+        "CPU and memory reservations are advisory."
+    ]
+
+
+def test_about_dialog_shows_version_icon_and_repository(dashboard, monkeypatch):
+    from PySide6.QtWidgets import QDialog, QLabel
+    from job_server import PLUGIN_VERSION
+
+    shown = []
+    monkeypatch.setattr(QDialog, "exec", lambda self: shown.append(self) or 0)
+    dashboard.show_about()
+    dialog = shown[0]
+    assert dialog.windowTitle() == "About Job Server"
+    labels = dialog.findChildren(QLabel)
+    texts = [label.text() for label in labels]
+    assert f"Job Server v{PLUGIN_VERSION}" in texts
+    assert any("github.com/HiroYokoyama/moleditpy_job_server" in text for text in texts)
+    assert any(not label.pixmap().isNull() for label in labels)
+    dialog.close()
 
 
 def test_start_is_queued_during_refresh_and_runs_once(dashboard, monkeypatch):
@@ -425,6 +458,7 @@ def test_status_banner_reports_each_server_state(dashboard, monkeypatch):
     dashboard.refresh()
     assert dashboard.status_level == "online"
     assert "accepting jobs" in dashboard.connection_status.text()
+    assert dashboard.resources.text() == ""  # The advisory lives under the trends now.
     assert dashboard.metric_bars["cpu"].value() == 75
     assert dashboard.metric_bars["memory"].value() == 100
     assert dashboard.jobs.item(0, 2).font().bold()
