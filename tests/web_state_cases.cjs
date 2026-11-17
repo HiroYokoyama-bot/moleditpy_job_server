@@ -49,7 +49,7 @@ async function application(fetch, storage=new Map()) {
     sessionStorage:{getItem:key=>storage.get(key)??null,setItem:(key,value)=>storage.set(key,String(value)),removeItem:key=>storage.delete(key)},
     location, history,
     setInterval(){}, setTimeout(){},clearTimeout(){},addEventListener(name,callback){events[name]=callback;},
-    fetch:async(url, options)=>url==='/api/v1/health' ? response({server_version:'synthetic'}) : fetch(url, options),
+    fetch:async(url, options)=>url==='/api/v1/health' ? response({server_version:'synthetic',hostname:'test-pc',label:"test-pc's job server running on Linux",description:'Shared PC note'}) : fetch(url, options),
   });
   context.window=context;
   const path=require('node:path');
@@ -183,6 +183,12 @@ async function loginView() {
   assert.equal(app.context.location.hash,'#login','A signed-out arrival starts at the sign-in page address');
   assert.equal(app.context.document.title,'Sign in · Job Server');
   assert.equal(app.get('#close-login').hidden,true);
+  await app.call('refresh')();
+  assert.equal(app.get('#login-pc').hidden,false,'The sign-in screen names the PC it signs in to');
+  assert.equal(app.get('#login-pc-name').textContent,'test-pc');
+  assert.equal(app.get('#login-pc-label').textContent,"test-pc's job server running on Linux");
+  assert.equal(app.get('#login-pc-description').textContent,'Shared PC note');
+  assert.equal(app.get('#pc-name').textContent,'test-pc','The header names the PC too');
   signedIn(app);
   assert.equal(app.context.document.body.classList.contains('signed-out'),false);
   assert.equal(app.get('#close-login').hidden,false);

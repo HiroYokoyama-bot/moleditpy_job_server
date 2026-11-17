@@ -185,6 +185,14 @@ function connection(text,online=false) {
   }
   $('#connection-dot').classList.toggle('online',online);
 }
+function showPc(health) {
+  $('#pc-name').textContent=health.hostname||'';
+  $('#pc-label').textContent=health.label||'';
+  $('#login-pc-name').textContent=health.hostname||'';
+  $('#login-pc-label').textContent=health.label||'';
+  $('#login-pc-description').textContent=health.description||'';
+  $('#login-pc').hidden=!health.hostname;
+}
 function requireSession(generation) {
   if(generation!==state.generation){const error=new Error('Session changed');error.staleSession=true;throw error;}
 }
@@ -350,7 +358,8 @@ async function refresh() {
   state.busy=true;state.busyGeneration=generation;
   try {
     const health=await api('GET','/health',null,{public:true});
-    connection('Server online · '+health.server_version+' · '+health.label,true);
+    connection('Server online · '+health.server_version,true);
+    showPc(health);
     if(!state.me)return;
     if(state.me.role==='admin'&&!$('#accounts').hidden)await accounts();
     const resource=await api('GET','/system/resources');
