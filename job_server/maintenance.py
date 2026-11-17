@@ -127,11 +127,15 @@ class Maintenance:
             self.settings, job["work_root"], job["id"],
             archive_path=job["archive_path"],
         )
+        # The stamp is the walk's start, not its end: a job that ends
+        # while its folder is being walked has not been measured after
+        # its end, and measure_finished must still give it its final one.
+        started = time.time()
         measured = disk_usage(folder)
         with self.db.transaction() as c:
             c.execute(
                 "UPDATE jobs SET disk_bytes=?,disk_measured_at=? WHERE id=?",
-                (measured, max(time.time(), floor), job["id"]),
+                (measured, max(started, floor), job["id"]),
             )
 
     def measure_running(self):

@@ -97,10 +97,9 @@ class Settings:
     tls_port: int = 8767
     python_executable: str = ""
     job_setup_commands: list[str] = field(default_factory=list)
-    #: The owner's own note about this PC, shown with the server status
-    #: (dashboard, web monitor, /health, /capabilities, /system/resources)
-    #: after the fixed line naming the PC and its OS, so users and AI
-    #: agents can tell what the PC is for and how to share it.
+    #: The owner's own note about this PC. It never leaves this PC: it is
+    #: shown only on this PC itself, in the dashboard's status banner and
+    #: the status command's output, under the fixed line naming the PC.
     description: str = ""
 
     @property

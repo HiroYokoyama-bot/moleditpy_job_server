@@ -162,7 +162,8 @@ class Jobs:
         # while the job runs, and measured one last time after it ends —
         # so a list request never walks a folder. Before the first
         # measurement the uploaded inputs are what is known; their sizes
-        # are already recorded, so this costs no extra I/O either.
+        # are already recorded on the file rows, so the fallback is one
+        # indexed sum instead of a folder walk.
         if job.get("disk_bytes") is not None:
             result["disk_bytes"] = job["disk_bytes"]
         else:

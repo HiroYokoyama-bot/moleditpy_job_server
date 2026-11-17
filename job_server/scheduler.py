@@ -110,7 +110,8 @@ class Scheduler:
                 # The folder is final once done.json exists, so the result
                 # list (digests included) is stored with the end itself:
                 # serving it later never reads the folder again. A folder
-                # that cannot be read leaves it to maintenance's next pass.
+                # that cannot be read keeps any earlier record and leaves
+                # the rest to maintenance's next pass.
                 try:
                     previous = parse_manifest(job["manifest"])
                     stored = json.dumps(manifest_record(work_directory(
@@ -119,7 +120,7 @@ class Scheduler:
                     ), previous))
                 except Exception:
                     logging.exception("Storing the result list failed for job %s", job["id"])
-                    stored = None
+                    stored = job["manifest"]
                 with self.db.transaction() as c:
                     c.execute(
                         "UPDATE jobs SET state=?,exit_code=?,ended_at=?,reason=?,relocate=?,manifest=? "
