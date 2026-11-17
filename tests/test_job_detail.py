@@ -71,6 +71,26 @@ def test_job_detail_reads_bounded_log_and_plain_file_metadata(details, monkeypat
     assert dialog.files.item(0, 0).text() == "<a>result.txt</a>"
     assert dialog.files.item(0, 2).text() == "—", "The list is shown before its digests"
     assert "/jobs/job-a/log?offset=134464&limit=65536" in calls
+    assert "/jobs/job-a/files" not in calls, "An unfinished job's digests are not asked for"
+    assert queued == []
+
+
+def test_a_finished_jobs_digests_fill_in_after_its_list(details, monkeypatch):
+    dashboard, dialog, queued, app = details
+    calls = []
+    plain = responses(calls)
+
+    def request(method, path):
+        result = plain(method, path)
+        if isinstance(result, dict) and "spec" in result:
+            result = {**result, "state": "DONE", "display_state": "DONE"}
+        return result
+
+    monkeypatch.setattr(dashboard.client, "request", request)
+    dialog.show_job("job-a", "alice")
+    queued.pop(0).run()
+    app.processEvents()
+    assert dialog.files.item(0, 2).text() == "—", "The list is shown before its digests"
     queued.pop(0).run()
     app.processEvents()
     assert dialog.files.item(0, 2).text() == "ab" * 32, "The digests fill in afterwards"
@@ -123,8 +143,12 @@ def test_refreshing_the_shown_job_keeps_it_on_screen_and_follows_until_it_ends(d
     dashboard, dialog, queued, app = details
     state = {"value": "RUNNING"}
 
+    digests = []
+
     def request(method, path):
         if "/files" in path:
+            if "digest=0" not in path:
+                digests.append(state["value"])
             entry = {"path": "result.txt", "size": 4}
             if "digest=0" not in path:
                 entry["sha256"] = "0" * 64
@@ -145,15 +169,14 @@ def test_refreshing_the_shown_job_keeps_it_on_screen_and_follows_until_it_ends(d
     state["value"] = "DONE"
     queued.pop(0).run()
     app.processEvents()
-    queued.pop(0).run()
-    app.processEvents()
     assert dialog.values["state"].text() == "DONE"
     assert dialog.files.item(0, 0) is item, "Unchanged result files are not redrawn"
     assert not dialog.follow.isActive(), "A finished job is no longer followed"
-    dialog._follow()
+    assert digests == [], "No digests were asked for while the job ran"
     queued.pop(0).run()
     app.processEvents()
     assert dialog.files.item(0, 2).text() == "0" * 64
+    assert digests == ["DONE"]
     assert queued == []
 
 

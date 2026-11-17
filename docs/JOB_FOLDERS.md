@@ -71,7 +71,9 @@ accepts a host filesystem path or exposes the data/control/TLS directories.
 - `GET /api/v1/browse/stat?path=<job-uuid>/results/output.txt&digest=true`:
   file metadata, optionally SHA-256. Listing and size-only stat do not hash files.
 - `GET /api/v1/jobs/<job-uuid>/files/results/output.txt`: existing verified,
-  resumable file download; continue using the file manifest for checksums.
+  resumable file download. Verify the received file against the response's
+  `X-SHA256` header (the whole file's SHA-256); list with `/files?digest=0`
+  so the server does not hash the whole job folder first.
 - `GET /api/v1/jobs/<job-uuid>/archive?path=results`: download a ZIP of a folder,
   preserving its relative paths and empty subdirectories. Omit `path` for the
   whole job work folder. ZIP member names are relative to the selected folder.
