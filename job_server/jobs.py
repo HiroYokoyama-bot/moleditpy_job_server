@@ -146,13 +146,19 @@ class Jobs:
             predecessor = self.db.one(
                 "SELECT state FROM jobs WHERE id=?", (result["spec"]["after_job"],)
             )
-            result["display_state"] = (
-                "BLOCKED"
-                if predecessor["state"] in TERMINAL
+            if (
+                predecessor["state"] in TERMINAL
                 and predecessor["state"] != "DONE"
                 and not result["spec"]["chain_any"]
-                else "QUEUED"
-            )
+            ):
+                result["display_state"] = "BLOCKED"
+            elif predecessor["state"] in TERMINAL:
+                # The dependency is met; the job queues like any other.
+                result["display_state"] = "QUEUED"
+            else:
+                result["display_state"] = "PENDING"
+        elif result["state"] == "PENDING":
+            result["display_state"] = "QUEUED"
         else:
             result["display_state"] = result["state"]
         if result["state"] == "PENDING":
