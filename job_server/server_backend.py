@@ -109,7 +109,9 @@ class JobServerBackend:
         return "\n".join(result["text"].splitlines()[-lines:])
 
     def files(self, job):
-        return self.client.request("GET", job_path(job.remote_job_id) + "/files")
+        # Paths and sizes only: nothing here needs digests, and asking for
+        # them makes the server read every file of the job first.
+        return self.client.request("GET", job_path(job.remote_job_id) + "/files?digest=0")
 
     def fetch_file(self, job, relative, target):
         return self.client.download(job.remote_job_id, relative, target)

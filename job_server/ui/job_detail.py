@@ -166,7 +166,9 @@ class JobDetailDialog(QDialog):
                 [tuple(str(entry.get(key, "—")) for key in ("path", "size", "sha256"))
                  for entry in files[:FILE_LIMIT]],
             )
-            if files:
+            # A running job's files are still changing, so their digests
+            # would be stale at once and cost the server a read of every file.
+            if files and job.get("state") in FINISHED:
                 self._load_digests(generation, identifier)
             self.shown_job = identifier
             self.finished_job = job.get("state") in FINISHED

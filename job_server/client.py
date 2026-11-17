@@ -1,6 +1,7 @@
 import base64
 import hashlib
 import json
+import re
 import ssl
 import threading
 import time
@@ -323,8 +324,16 @@ class JobServerClient:
 
         validate_path(relative)
         route = job_path(job_id)
+        # The listing is asked for without digests: with them, the server
+        # hashes the whole job folder first, which for a large or still
+        # running job can outlast this client's timeout. The download's own
+        # X-SHA256 header, hashed from the file being sent, is checked instead.
         entry = next(
-            (item for item in self.request("GET", route + "/files") if item["path"] == relative),
+            (
+                item
+                for item in self.request("GET", route + "/files?digest=0")
+                if item["path"] == relative
+            ),
             None,
         )
         if not entry:
@@ -333,35 +342,40 @@ class JobServerClient:
         destination.parent.mkdir(parents=True, exist_ok=True)
         partial = destination.with_name(destination.name + ".partial")
         offset = partial.stat().st_size if partial.exists() else 0
-        if offset > entry["size"]:
-            partial.unlink()
+        if offset >= entry["size"]:
+            # A full-size leftover is fetched again: only a response carries
+            # the checksum it must be verified against.
+            if partial.exists():
+                partial.unlink()
             offset = 0
         self._ensure_auth(route + "/files")
-        if offset < entry["size"] or not partial.exists():
-            headers = {"Authorization": "Bearer " + self.token}
-            if offset:
-                headers["Range"] = f"bytes={offset}-"
-            request = Request(
-                self.url + "/api/v1" + route + "/files/" + quote(relative, safe="/"),
-                headers=headers,
-            )
-            with self._open(request) as response:
-                if offset and (
-                    response.status != 206
-                    or not response.headers.get("Content-Range", "").startswith(f"bytes {offset}-")
-                ):
-                    raise ValueError("Server did not honor resume range")
-                with open_regular(partial, "r+b") as stream:
-                    if not offset:
-                        stream.truncate(0)
-                    stream.seek(offset)
-                    while data := response.read(1024 * 1024):
-                        stream.write(data)
-                        if stream.tell() > entry["size"]:
-                            raise ValueError("Download exceeded expected file size")
+        headers = {"Authorization": "Bearer " + self.token}
+        if offset:
+            headers["Range"] = f"bytes={offset}-"
+        request = Request(
+            self.url + "/api/v1" + route + "/files/" + quote(relative, safe="/"),
+            headers=headers,
+        )
+        with self._open(request) as response:
+            expected = (response.headers.get("X-SHA256") or "").lower()
+            if not re.fullmatch(r"[0-9a-f]{64}", expected):
+                raise ValueError("Server sent no file checksum")
+            if offset and (
+                response.status != 206
+                or not response.headers.get("Content-Range", "").startswith(f"bytes {offset}-")
+            ):
+                raise ValueError("Server did not honor resume range")
+            with open_regular(partial, "r+b") as stream:
+                if not offset:
+                    stream.truncate(0)
+                stream.seek(offset)
+                while data := response.read(1024 * 1024):
+                    stream.write(data)
+                    if stream.tell() > entry["size"]:
+                        raise ValueError("Download exceeded expected file size")
         from .files import sha256
 
-        if partial.stat().st_size != entry["size"] or sha256(partial) != entry["sha256"]:
+        if partial.stat().st_size != entry["size"] or sha256(partial) != expected:
             partial.unlink()
             raise ValueError("Downloaded file checksum differs; retry from zero")
         partial.replace(destination)
