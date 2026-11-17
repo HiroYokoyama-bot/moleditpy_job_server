@@ -57,6 +57,26 @@ def test_the_queue_names_owners_and_jobs_but_keeps_details_private(client, alice
     }
 
 
+def test_waiting_display_names_queueing_and_dependency_waits(client, alice):
+    """QUEUED waits for a slot; PENDING waits for its predecessor."""
+    plain = pending(client, alice, name="plain")
+    predecessor = pending(client, alice, name="predecessor")
+    dependent = pending(client, alice, after_job=predecessor, name="dependent")
+
+    def display(job_id):
+        answer = client.get(f"/api/v1/jobs/{job_id}", headers=alice["headers"])
+        return answer.json()["display_state"]
+
+    assert display(plain) == "QUEUED"
+    assert display(dependent) == "PENDING"
+    with client.app.state.db.transaction() as c:
+        c.execute("UPDATE jobs SET state='DONE' WHERE id=?", (predecessor,))
+    assert display(dependent) == "QUEUED"
+    with client.app.state.db.transaction() as c:
+        c.execute("UPDATE jobs SET state='FAILED' WHERE id=?", (predecessor,))
+    assert display(dependent) == "BLOCKED"
+
+
 def test_an_administrator_gets_every_job_id(client, alice):
     admin = enroll(client, "queue-admin", "admin")
     job = pending(client, alice, name="example")
