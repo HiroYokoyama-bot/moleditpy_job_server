@@ -645,12 +645,10 @@ class Dashboard(QDialog):
         )
         about_form.addRow("Description", self.description_edit)
         about_help = QLabel(
-            "Your note about this PC, shown with the server status — in this window, "
-            "the web monitor, client apps and the API — after the fixed line "
-            f"“{pc_description()}”. It is answered before sign-in, so anyone who can "
-            "reach this server can read it: write it for the people and AI agents "
-            "who will use this PC — what it is for, and how to share it — and keep "
-            "private details out of it."
+            "Your note about this PC, shown after the fixed line "
+            f"“{pc_description()}” in this window's status banner and in the "
+            "status command's output. It stays on this PC: the web monitor, "
+            "client apps and the API never receive it."
         )
         about_help.setWordWrap(True)
         about_form.addRow(about_help)

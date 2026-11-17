@@ -180,14 +180,15 @@ async function accountsOrdering() {
 async function loginView() {
   const app=await application(async url=>{throw new Error('Unexpected URL '+url);});
   assert.ok(app.context.document.body.classList.contains('signed-out'));
-  assert.equal(app.get('#login-dialog').open,true);
+  assert.equal(app.context.location.hash,'#login','A signed-out arrival starts at the sign-in page address');
+  assert.equal(app.context.document.title,'Sign in · Job Server');
   assert.equal(app.get('#close-login').hidden,true);
   signedIn(app);
   assert.equal(app.context.document.body.classList.contains('signed-out'),false);
-  assert.equal(app.get('#login-dialog').open,false);
+  assert.equal(app.get('#close-login').hidden,false);
   app.call('clearSession')();
   assert.ok(app.context.document.body.classList.contains('signed-out'));
-  assert.equal(app.get('#login-dialog').open,true);
+  assert.equal(app.context.document.title,'Sign in · Job Server');
 }
 async function connectionFailure() {
   const app=await application(async url=>{throw new Error('Unexpected URL '+url);});
@@ -392,15 +393,22 @@ async function browserHistory() {
   const app=await application(steadyServer(()=>[job(JOB_A),job(JOB_B)]));
   signedIn(app);
   const history=app.context.history,location=app.context.location;
+  assert.equal(location.hash,'#login','A signed-out arrival starts at the sign-in page');
   app.call('panel')('overview');
-  assert.equal(location.hash,'#overview');assert.equal(history.entries.length,1,'The first page replaces the bare address');
+  assert.equal(location.hash,'#overview');assert.equal(history.entries.length,2,'Signing in puts the overview on top of the sign-in page');
+  history.back();await new Promise(done=>setImmediate(done));
+  assert.equal(location.hash,'#login','Back from the first page returns to the sign-in page');
+  assert.equal(app.context.document.title,'Sign in · Job Server');
+  assert.ok(app.state.me,'Viewing the sign-in page does not end the session');
+  history.forward();await new Promise(done=>setImmediate(done));
+  assert.equal(location.hash,'#overview','Forward returns to the overview');
   app.call('panel')('submit');assert.equal(location.hash,'#submit');
   await app.call('detail')(JOB_A);assert.equal(location.hash,'#job/'+JOB_A);
   history.back();await new Promise(done=>setImmediate(done));
   assert.equal(location.hash,'#submit');assert.equal(app.state.job,null,'Back leaves the job page');
   history.forward();await new Promise(done=>setTimeout(done,0));
   assert.equal(app.state.job,JOB_A,'Forward opens the same job again');
-  assert.equal(history.entries.length,3,'Following history adds no entries');
+  assert.equal(history.entries.length,4,'Following history adds no entries');
   // The page's own back button behaves like the browser's.
   app.get('#back').listeners.click();await new Promise(done=>setImmediate(done));
   assert.equal(location.hash,'#submit');
@@ -410,7 +418,7 @@ async function browserHistory() {
   location.hash='#job/not-a-job';app.call('followRoute')();
   assert.equal(app.state.job,null,'A malformed job address shows the overview');
   app.get('#signout').listeners.click();
-  assert.equal(location.hash,'#overview','The next person to sign in does not start on this user\'s page');
+  assert.equal(location.hash,'#login','The next person to sign in starts on the sign-in page');
   history.back();assert.equal(app.state.me,null,'Signed out, history changes nothing');
 }
 async function steadyLists() {

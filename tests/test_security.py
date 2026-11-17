@@ -175,3 +175,15 @@ def test_output_manifest_excludes_special_files(client, alice):
     work = client.app.state.jobs.directory(job_id)
     os.mkfifo(work / "result")
     assert client.get(f"/api/v1/jobs/{job_id}/files", headers=alice["headers"]).json() == []
+
+
+def test_a_jobs_output_list_carries_the_digest_downloads_verify_against(client, alice):
+    job_id = reserve(client, alice).json()["id"]
+    client.post(f"/api/v1/jobs/{job_id}/commit", headers=alice["headers"])
+    work = client.app.state.jobs.directory(job_id)
+    (work / "result.txt").write_bytes(b"abc")
+    entries = client.get(f"/api/v1/jobs/{job_id}/files", headers=alice["headers"]).json()
+    assert entries == [{
+        "path": "result.txt", "size": 3,
+        "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+    }]

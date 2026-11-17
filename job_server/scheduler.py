@@ -9,7 +9,8 @@ from pathlib import Path
 
 import psutil
 
-from .jobs import PENDING_IN_ORDER, TERMINAL
+from .files import manifest_record, parse_manifest
+from .jobs import PENDING_IN_ORDER, TERMINAL, work_directory
 from .history import ResourceHistory
 from .maintenance import Maintenance
 from .worker import atomic_json
@@ -106,9 +107,23 @@ class Scheduler:
                     else:
                         self._mark_recheck(job, "NEEDS_RECHECK: termination could not be verified")
                     continue
+                # The folder is final once done.json exists, so the result
+                # list (digests included) is stored with the end itself:
+                # serving it later never reads the folder again. A folder
+                # that cannot be read keeps any earlier record and leaves
+                # the rest to maintenance's next pass.
+                try:
+                    previous = parse_manifest(job["manifest"])
+                    stored = json.dumps(manifest_record(work_directory(
+                        self.settings, job["work_root"], job["id"],
+                        archive_path=job["archive_path"],
+                    ), previous))
+                except Exception:
+                    logging.exception("Storing the result list failed for job %s", job["id"])
+                    stored = job["manifest"]
                 with self.db.transaction() as c:
                     c.execute(
-                        "UPDATE jobs SET state=?,exit_code=?,ended_at=?,reason=?,relocate=? "
+                        "UPDATE jobs SET state=?,exit_code=?,ended_at=?,reason=?,relocate=?,manifest=? "
                         "WHERE id=? AND state='RUNNING'",
                         (
                             result["state"],
@@ -116,6 +131,7 @@ class Scheduler:
                             result["ended_at"],
                             result["reason"],
                             self.settings.relocates,
+                            stored,
                             job["id"],
                         ),
                     )

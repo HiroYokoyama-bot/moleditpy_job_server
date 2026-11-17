@@ -1,4 +1,5 @@
 import hashlib
+import json
 import os
 import re
 import stat
@@ -147,8 +148,15 @@ def disk_usage(root):
     return total
 
 
-def manifest(root):
-    result = []
+def _listed(root):
+    """(relative path, path, stat) for every file a job folder lists, in order.
+
+    Only ordinary, singly-linked files inside the folder itself: the same
+    set the download endpoints will serve.
+    """
+    from .errors import ServerError
+
+    found = []
     for directory, dirs, names in os.walk(root, followlinks=False):
         dirs[:] = [name for name in dirs if not is_link(Path(directory) / name)]
         for name in names:
@@ -156,12 +164,88 @@ def manifest(root):
             relative = path.relative_to(root).as_posix()
             if any(part.casefold() in RESERVED for part in relative.split("/")):
                 continue
-            from .errors import ServerError
-
             try:
                 path = contained(root, relative)
-                digest = sha256(path)
-                result.append({"path": relative, "size": path.stat().st_size, "sha256": digest})
-            except ServerError:
+                info = path.stat()
+            except (ServerError, OSError):
                 continue
-    return sorted(result, key=lambda item: item["path"])
+            if stat.S_ISREG(info.st_mode) and info.st_nlink == 1:
+                found.append((relative, path, info))
+    return sorted(found, key=lambda item: item[0])
+
+
+def listing(root):
+    """A folder's files as path and size only, from a stat-only walk that
+    never reads a file: for views that show the list first and fill the
+    digests in once they are recorded."""
+    return [
+        {"path": relative, "size": info.st_size}
+        for relative, _path, info in _listed(root)
+    ]
+
+
+def manifest_stamp(root):
+    """A folder's listed files as (path, size, mtime, ctime) rows: a cheap
+    stat-only fingerprint of the folder's contents. The ctime is in the
+    fingerprint because it cannot be set by hand — a rewrite that restores
+    the old mtime still moves it — so the fingerprint changes whenever a
+    listed file is added, removed or rewritten, and a stored manifest can
+    be told apart from a stale one. On Windows the ctime is the file's
+    creation time instead, which still tells a replaced file apart; only
+    an in-place rewrite there that also restores the mtime leaves no
+    trace in stat at all."""
+    return [
+        [relative, info.st_size, info.st_mtime_ns, info.st_ctime_ns]
+        for relative, _path, info in _listed(root)
+    ]
+
+
+def parse_manifest(text):
+    """A stored manifest record, or None when the stored value is missing
+    or not a record this build can read: an unreadable record counts as
+    no record, so the next listing recomputes and replaces it."""
+    if not text:
+        return None
+    try:
+        record = json.loads(text)
+        if not isinstance(record["entries"], list) or not isinstance(record["stamp"], list):
+            return None
+    except (ValueError, TypeError, KeyError):
+        return None
+    return record
+
+
+def manifest_record(root, previous=None):
+    """A folder's manifest with digests, plus its stamp, in one walk.
+
+    A file unchanged since the previous record (same stamp row) keeps its
+    digest, so refreshing a growing job folder only reads the files that
+    were added or rewritten since the last record.
+    """
+    from .errors import ServerError
+
+    known = {}
+    if previous:
+        try:
+            digests = {entry["path"]: entry["sha256"] for entry in previous["entries"]}
+            known = {
+                row[0]: (tuple(row), digests[row[0]])
+                for row in previous["stamp"]
+                if row[0] in digests
+            }
+        except (TypeError, KeyError):
+            known = {}
+    entries, stamp = [], []
+    for relative, path, info in _listed(root):
+        row = [relative, info.st_size, info.st_mtime_ns, info.st_ctime_ns]
+        prior = known.get(relative)
+        if prior and prior[0] == tuple(row):
+            digest = prior[1]
+        else:
+            try:
+                digest = sha256(path)
+            except (ServerError, OSError):
+                continue
+        entries.append({"path": relative, "size": info.st_size, "sha256": digest})
+        stamp.append(row)
+    return {"entries": entries, "stamp": stamp}

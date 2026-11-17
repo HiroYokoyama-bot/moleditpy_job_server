@@ -107,6 +107,41 @@ def test_running_job_disk_usage_tracks_growth_at_most_once_a_minute(tmp_path):
     assert jobs.public(row)["disk_bytes"] == 60
 
 
+def test_a_job_that_ends_during_its_measurement_is_measured_once_more(tmp_path, monkeypatch):
+    import time
+
+    from job_server import maintenance as maintenance_module
+
+    settings, db, jobs = _stack(tmp_path, "RUNNING")
+    folder = jobs.directory("job1")
+    (folder / "input.inp").write_bytes(b"i" * 10)
+    maintenance = Maintenance(db, jobs, settings)
+    real = maintenance_module.disk_usage
+
+    def ending_walk(path):
+        total = real(path)
+        (folder / "final.out").write_bytes(b"f" * 5)
+        # The end is stamped a beat after the walk began, not at the wall
+        # clock's mercy: on Windows one clock tick can span the whole walk.
+        with db.transaction() as c:
+            c.execute(
+                "UPDATE jobs SET state='DONE',ended_at=? WHERE id='job1'",
+                (time.time() + 1,),
+            )
+        return total
+
+    monkeypatch.setattr(maintenance_module, "disk_usage", ending_walk)
+    maintenance.measure_running()
+    monkeypatch.setattr(maintenance_module, "disk_usage", real)
+    row = db.one("SELECT * FROM jobs WHERE id='job1'")
+    assert row["disk_bytes"] == 10
+    assert row["disk_measured_at"] < row["ended_at"], (
+        "The measurement began before the job ended, so it is not the final one"
+    )
+    maintenance.measure_finished()
+    assert db.one("SELECT * FROM jobs WHERE id='job1'")["disk_bytes"] == 15
+
+
 def test_a_job_measured_while_running_is_measured_once_more_after_it_ends(tmp_path):
     settings, db, jobs = _stack(tmp_path, "RUNNING")
     (jobs.directory("job1") / "input.inp").write_bytes(b"i" * 10)

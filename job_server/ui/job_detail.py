@@ -24,6 +24,10 @@ class JobDetailDialog(QDialog):
         self.resize(800, 610)
         self.pool = QThreadPool(self)
         self.pool.setMaxThreadCount(1)
+        # Digests load on their own pool: a slow digest fetch must not
+        # queue ahead of the next refresh on the single refresh thread.
+        self.digest_pool = QThreadPool(self)
+        self.digest_pool.setMaxThreadCount(1)
         self._tasks = set()
         self.generation = 0
         self.job_id = None
@@ -126,7 +130,7 @@ class JobDetailDialog(QDialog):
             metadata = client.request("GET", f"/jobs/{identifier}/log?limit=1")
             offset = max(0, metadata.get("size", 0) - LOG_LIMIT)
             log = client.request("GET", f"/jobs/{identifier}/log?offset={offset}&limit={LOG_LIMIT}")
-            files = client.request("GET", f"/jobs/{identifier}/files")
+            files = client.request("GET", f"/jobs/{identifier}/files?digest=0")
             return job, log, files
 
         task = Task(work)
@@ -162,6 +166,8 @@ class JobDetailDialog(QDialog):
                 [tuple(str(entry.get(key, "—")) for key in ("path", "size", "sha256"))
                  for entry in files[:FILE_LIMIT]],
             )
+            if files:
+                self._load_digests(generation, identifier)
             self.shown_job = identifier
             self.finished_job = job.get("state") in FINISHED
             if self.finished_job:
@@ -183,6 +189,40 @@ class JobDetailDialog(QDialog):
         connect_queued(task.signals.finished, finished, self, (object,), cleanup=cleanup)
         connect_queued(task.signals.failed, failed, self, (str,), cleanup=cleanup)
         self.pool.start(task)
+
+    def _load_digests(self, generation, identifier):
+        # The file list is already on screen without its digests, which can
+        # take a while to record for a job with large outputs. They fill in
+        # when they arrive; a failure leaves them blank instead of blanking
+        # the details with them, and the next refresh tries again.
+        client = self.dashboard.client
+
+        def work():
+            return client.request("GET", f"/jobs/{identifier}/files")
+
+        task = Task(work)
+        self._tasks.add(task)
+
+        def current():
+            return generation == self.generation and client is self.dashboard.client and self.isVisible()
+
+        def finished(files):
+            self._tasks.discard(task)
+            if not current():
+                return
+            self.dashboard.fill(
+                self.files,
+                [tuple(str(entry.get(key, "—")) for key in ("path", "size", "sha256"))
+                 for entry in files[:FILE_LIMIT]],
+            )
+
+        def failed(_message):
+            self._tasks.discard(task)
+
+        cleanup = (task.signals.finished, task.signals.failed)
+        connect_queued(task.signals.finished, finished, self, (object,), cleanup=cleanup)
+        connect_queued(task.signals.failed, failed, self, (str,), cleanup=cleanup)
+        self.digest_pool.start(task)
 
     def _show_log(self, text):
         """Replace the log, following its end only if the reader was already there."""

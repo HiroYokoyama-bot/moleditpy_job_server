@@ -169,28 +169,19 @@ function renderQueue(queue) {
   $('#queue-summary').textContent=queue.running.length+' running · '+queue.waiting.length+' waiting'+(next?' · your next job: '+ahead(next.position-1):'')+(queue.paused?' · paused':'');
 }
 function button(parent,text,call) { const element=document.createElement('button'); element.textContent=text; element.addEventListener('click',()=>safe(call)); parent.append(element); return element; }
-async function safe(call) { try { await call(); } catch(error) { if(error.staleSession)return; if(error.status===401&&state.me)clearSession();message(error.message); if($('#login-dialog').open)$('#login-status').textContent=error.message; } }
+async function safe(call) { try { await call(); } catch(error) { if(error.staleSession)return; if(error.status===401&&state.me)clearSession();message(error.message); if(!$('#login').hidden)$('#login-status').textContent=error.message; } }
 function setSignedIn(value) {
   document.body.classList.toggle('signed-out',!value);
   $('#close-login').hidden=!value;
-  if(value)$('#login-dialog').close();
-  else if(!$('#login-dialog').open)$('#login-dialog').show();
+  if(!value)panel('login',{record:false});
 }
 function clearPasswordForms() {
   for(const form of [$('#password-form'),$('#reset-form')])form.reset?.();
   $('#password-status').textContent='';$('#reset-status').textContent='';
 }
-function connection(text,online=false,note='') {
-  // The owner's note about this PC rides along in grey: it is their words
-  // for the PC's users, not part of the server's own status line.
+function connection(text,online=false) {
   for(const element of [$('#connection-text'),$('#login-connection')]) {
     element.textContent=text;
-    if(note) {
-      const span=document.createElement('span');
-      span.style.color='#8b949e';
-      span.textContent=' · '+note;
-      element.appendChild(span);
-    }
   }
   $('#connection-dot').classList.toggle('online',online);
 }
@@ -211,7 +202,7 @@ function clearSession() {
   for(const id of ['log','detail-name','detail-id','detail-spec','queue-summary'])$('#'+id).textContent='';
   for(const id of ['running','pending','cpu','memory','cpu-now','memory-now'])$('#'+id).textContent='—';
   clearTrends();
-  $('#job-controls').hidden=true;panel('overview',{record:false});setSignedIn(false);return state.generation;
+  $('#job-controls').hidden=true;setSignedIn(false);return state.generation;
 }
 
 async function api(method,path,body,options={}) {
@@ -273,10 +264,10 @@ async function restoreSession() {
   if(!saved||typeof saved.token!=='string'||!saved.token||saved.token.length>256||
      !Number.isFinite(saved.expires)||saved.expires<Date.now()/1000+10||
      !Number.isFinite(saved.authenticated)||saved.authenticated>Date.now()/1000+30) {
-    await refresh();return;
+    startAtLoginAddress();await refresh();return;
   }
   state.token=saved.token;state.expires=saved.expires;state.authenticated=saved.authenticated;
-  try {await openSession();} catch(error) {if(generation===state.generation)clearSession();throw error;}
+  try {await openSession();} catch(error) {if(generation===state.generation){clearSession();startAtLoginAddress();}throw error;}
 }
 $('#login-form').addEventListener('submit',event=>{
   event.preventDefault();const form=event.currentTarget,submit=form.querySelector('[type=submit]');
@@ -285,14 +276,13 @@ $('#login-form').addEventListener('submit',event=>{
   form.elements.password.value='';
   safe(()=>login(username,password)).finally(()=>{submit.disabled=false;});
 });
-$('#signin').addEventListener('click',()=>{$('#login-dialog').showModal();$('#login-status').textContent='';});
-function cancelLogin(){if($('#login-form').querySelector('[type=submit]').disabled)clearSession();$('#login-form').elements.password.value='';if(state.me)$('#login-dialog').close();}
+$('#signin').addEventListener('click',()=>{panel('login');$('#login-status').textContent='';});
+function cancelLogin(){if($('#login-form').querySelector('[type=submit]').disabled)clearSession();$('#login-form').elements.password.value='';if(state.me)panel('overview');}
 $('#close-login').addEventListener('click',cancelLogin);
-$('#login-dialog').addEventListener('cancel',cancelLogin);
 function signOut() {
   const token=state.token;clearSession();
-  // The next person to sign in here starts from the overview, not from this user's page.
-  try {globalThis.history?.replaceState?.({depth:0},'','#overview');} catch {}
+  // The next person to sign in here starts from the sign-in page, not from this user's page.
+  try {globalThis.history?.replaceState?.({depth:0},'','#login');} catch {}
   if(token)fetch('/api/v1/auth/logout',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:'{}',credentials:'omit',redirect:'error',cache:'no-store',keepalive:true}).catch(()=>{});
 }
 $('#signout').addEventListener('click',signOut);
@@ -307,8 +297,17 @@ const PAGES=['overview','submit','accounts','account'];
 const JOB_ID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 function route() {
   const hash=String(globalThis.location?.hash||'').replace(/^#/,'');
+  if(hash==='login')return {name:'login'};
   if(hash.startsWith('job/')&&JOB_ID.test(hash.slice(4)))return {name:'detail',job:hash.slice(4).toLowerCase()};
   return {name:PAGES.includes(hash)?hash:'overview'};
+}
+function startAtLoginAddress() {
+  // A signed-out arrival at the overview's address starts from the sign-in
+  // page's own address instead, so signing in puts the overview on top of
+  // it and the browser's Back returns to the sign-in page. A deep link to
+  // another page is kept, and signing in follows it as before.
+  if(route().name!=='overview')return;
+  try {globalThis.history?.replaceState?.({depth:0},'','#login');} catch {}
 }
 function remember(name,job) {
   const hash='#'+(name==='detail'?'job/'+job:name);
@@ -319,16 +318,21 @@ function remember(name,job) {
 function followRoute() {
   const target=route();
   if(target.name==='detail'){if(state.job!==target.job)safe(()=>detail(target.job,true,{record:false}));}
+  else if(target.name==='login')panel('overview');
   else if(target.name==='accounts'&&state.me?.role!=='admin')panel('overview',{record:false});
   else panel(target.name,{record:false});
 }
-globalThis.addEventListener?.('popstate',()=>{if(state.me)followRoute();});
+globalThis.addEventListener?.('popstate',()=>{
+  if(!state.me||route().name==='login')panel('login',{record:false});
+  else followRoute();
+});
 function panel(name,{record=true,job=null}={}) {
   if (name==='accounts'&&state.me?.role!=='admin') return;
   if (record) remember(name,job);
+  document.body.classList.toggle('login-page',name==='login');
   document.querySelectorAll('.panel').forEach(element=>element.hidden=element.id!==name);
   document.querySelectorAll('.nav').forEach(element=>element.classList.toggle('active',element.dataset.panel===name));
-  const title={overview:'Overview',submit:'Submit a job',accounts:'Users & devices',account:'My account',detail:'Job details'}[name];
+  const title={overview:'Overview',submit:'Submit a job',accounts:'Users & devices',account:'My account',detail:'Job details',login:'Sign in'}[name];
   $('#page-title').textContent=title;
   // Named per page, so the browser's history and tab list say where each entry leads.
   document.title=title+' · Job Server';
@@ -346,7 +350,7 @@ async function refresh() {
   state.busy=true;state.busyGeneration=generation;
   try {
     const health=await api('GET','/health',null,{public:true});
-    connection('Server online · '+health.server_version+' · '+health.label,true,health.description);
+    connection('Server online · '+health.server_version+' · '+health.label,true);
     if(!state.me)return;
     if(state.me.role==='admin'&&!$('#accounts').hidden)await accounts();
     const resource=await api('GET','/system/resources');
