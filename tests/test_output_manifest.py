@@ -2,7 +2,10 @@
 
 import hashlib
 import json
+import sys
 import time
+
+import pytest
 
 from job_server.db import Database
 from job_server.files import parse_manifest
@@ -106,8 +109,11 @@ def test_the_listing_can_be_read_without_digests(client, alice):
     assert entries == [{"path": "result.txt", "size": 3, "sha256": DIGEST}]
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="Windows stat has no change time: its ctime is the creation time",
+)
 def test_a_rewrite_that_restores_the_mtime_still_gets_a_new_digest(client, alice):
-    import hashlib
     import os
 
     job_id = reserve(client, alice).json()["id"]
@@ -120,6 +126,25 @@ def test_a_rewrite_that_restores_the_mtime_still_gets_a_new_digest(client, alice
     before = target.stat()
     target.write_bytes(b"xyz")
     os.utime(target, ns=(before.st_atime_ns, before.st_mtime_ns))
+    entries = client.get(f"/api/v1/jobs/{job_id}/files", headers=alice["headers"]).json()
+    assert entries[0]["sha256"] == hashlib.sha256(b"xyz").hexdigest()
+
+
+def test_a_replace_that_restores_the_mtime_still_gets_a_new_digest(client, alice):
+    import os
+
+    job_id = reserve(client, alice).json()["id"]
+    client.post(f"/api/v1/jobs/{job_id}/commit", headers=alice["headers"])
+    work = client.app.state.jobs.directory(job_id)
+    target = work / "result.txt"
+    target.write_bytes(b"abc")
+    entries = client.get(f"/api/v1/jobs/{job_id}/files", headers=alice["headers"]).json()
+    assert entries[0]["sha256"] == DIGEST
+    before = target.stat()
+    staged = work / "staged.txt"
+    staged.write_bytes(b"xyz")
+    os.utime(staged, ns=(before.st_atime_ns, before.st_mtime_ns))
+    os.replace(staged, target)
     entries = client.get(f"/api/v1/jobs/{job_id}/files", headers=alice["headers"]).json()
     assert entries[0]["sha256"] == hashlib.sha256(b"xyz").hexdigest()
 

@@ -190,7 +190,10 @@ def manifest_stamp(root):
     fingerprint because it cannot be set by hand — a rewrite that restores
     the old mtime still moves it — so the fingerprint changes whenever a
     listed file is added, removed or rewritten, and a stored manifest can
-    be told apart from a stale one."""
+    be told apart from a stale one. On Windows the ctime is the file's
+    creation time instead, which still tells a replaced file apart; only
+    an in-place rewrite there that also restores the mtime leaves no
+    trace in stat at all."""
     return [
         [relative, info.st_size, info.st_mtime_ns, info.st_ctime_ns]
         for relative, _path, info in _listed(root)
