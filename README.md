@@ -147,6 +147,11 @@ The window also opens without MoleditPy — `python -m job_server gui`, or
 `launch_job_server.bat` on Windows — and a second launch brings the running
 window to the front instead of opening another.
 
+With MoleditPy 5.3 or later, the plugin installed through the Plugin Installer
+runs the same commands from its plugin folder, with no separate install:
+`moleditpy -r job_server gui` opens the window, `moleditpy -r job_server serve`
+runs the server, and so on. Hints the commands print then name that form too.
+
 Status answers (`status`, the web monitor, the API) name the PC they came
 from: its hostname and a fixed line — "<PC>'s job server running on <OS>".
 The name is answered before sign-in, so a client can tell which PC it
