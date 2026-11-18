@@ -7,10 +7,21 @@ from pathlib import Path
 from .settings import Settings, pc_resources
 
 
+def _program():
+    """How this command was started, so a hint names a command that exists.
+
+    Started by ``moleditpy --run-plugin`` the server is a plugin folder, and
+    the ``moleditpy-job-server`` launcher pip creates need not be installed.
+    """
+    if "moleditpy.plugins.plugin_runner" in sys.modules:
+        return f"moleditpy -r {__package__ or 'job_server'}"
+    return "moleditpy-job-server"
+
+
 def _command(action, args):
     """The command line for a next step, carrying a non-default --config along."""
     config = getattr(args, "config", None)
-    return f"moleditpy-job-server {action}" + (f' --config "{config}"' if config else "")
+    return f"{_program()} {action}" + (f' --config "{config}"' if config else "")
 
 
 def _ask_admin(username=None):
@@ -123,7 +134,11 @@ def _init(args):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="MoleditPy Job Server — LAN computational helper")
+    # ASCII only: a Windows console piped elsewhere encodes with the ANSI code
+    # page, and an em dash there made --help end in a UnicodeEncodeError.
+    parser = argparse.ArgumentParser(
+        prog=_program(), description="MoleditPy Job Server - LAN computational helper"
+    )
     parser.add_argument("--config", type=Path)
     sub = parser.add_subparsers(dest="action", required=True)
     for name in ("serve", "status", "init", "gui", "create-admin", "reset-password"):
