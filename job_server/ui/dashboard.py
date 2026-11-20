@@ -55,7 +55,13 @@ from .. import PLUGIN_VERSION
 from ..client import ClientError, JobServerClient
 from .units import MB_PER_GB, GBSpinBox, FocusSpinBox, byte_size, gb
 from .network import LanAddressList
+from .gui_log import LOG, attach as attach_gui_log, thread_stack
 from ..settings import Settings, pc_description, pc_resources, pc_size_label
+
+
+#: Seconds a worker call may run before the window gives up on it. Its requests
+#: time out after 3 s each, so only a call that is truly stuck gets this far.
+STUCK_SECONDS = 60
 
 
 class Signals(QObject):
@@ -63,16 +69,39 @@ class Signals(QObject):
     failed = Signal(str)
 
 
+def failure_text(exc):
+    """What a failed call says, never blank: a bare timeout's str() is only "timed out"."""
+    text = str(exc).strip()
+    name = type(exc).__name__
+    return f"{name}: {text}" if text and name not in text else (text or name)
+
+
 class Task(QRunnable):
-    def __init__(self, call):
+    def __init__(self, call, label=""):
         super().__init__()
         self.call, self.signals = call, Signals()
+        self.label = label or getattr(call, "__qualname__", repr(call))
+        self.queued = time.monotonic()
+        self.started = None  # monotonic time the worker began, None while queued
+        self.thread_ident = None
+        self.abandoned = False
 
     def run(self):
+        import threading
+
+        self.thread_ident = threading.get_ident()
+        self.started = time.monotonic()
         try:
-            self.signals.finished.emit(self.call())
-        except Exception as exc:
-            self.signals.failed.emit(str(exc))
+            result = self.call()
+        except BaseException as exc:  # noqa: BLE001 - the window must hear of every end
+            LOG.warning(
+                "Task %s failed after %.1f s: %s", self.label,
+                time.monotonic() - self.started, failure_text(exc),
+                exc_info=not isinstance(exc, (OSError, ClientError, ValueError)),
+            )
+            self.signals.failed.emit(str(exc) or type(exc).__name__)
+            return
+        self.signals.finished.emit(result)
 
 
 # Past a limit, such as CPU use beyond every core into hyper-threads: beyond red.
@@ -182,9 +211,13 @@ class Dashboard(QDialog):
             f"http://127.0.0.1:{self.settings.port}",
             self.settings.root / "identity" / "admin-device.key", timeout=3,
         )
+        attach_gui_log(self.settings.root / "logs")
+        LOG.info("Job Server window %s opened (pid %d)", PLUGIN_VERSION, os.getpid())
         self.pool = QThreadPool(self)
         self.pool.setMaxThreadCount(1)
         self._tasks = set()
+        self._current_task = None
+        self._refresh_failures = 0
         self.busy = False
         self._pending_tasks = deque()
         self._pending_lifecycle = set()
@@ -948,29 +981,89 @@ class Dashboard(QDialog):
             on_start()
         task = Task(call)
         self._tasks.add(task)
+        self._current_task = task
 
         def finished(value):
             self._tasks.discard(task)
+            if task.abandoned:
+                LOG.info("Task %s finished after it was abandoned; result ignored", task.label)
+                return
+            self._current_task = None
             self.busy = False
-            if on_ok:
-                on_ok(value)
-            if success_message:
-                QMessageBox.information(self, "Success", success_message)
-            self._run_pending_task()
+            # The queue must move on even when showing a result fails, or every
+            # later refresh would wait behind the queued operation for good.
+            try:
+                if on_ok:
+                    on_ok(value)
+                if success_message:
+                    QMessageBox.information(self, "Success", success_message)
+            except Exception:
+                LOG.exception("Showing the result of %s failed", task.label)
+            finally:
+                self._run_pending_task()
 
         def failed(message):
             self._tasks.discard(task)
+            if task.abandoned:
+                LOG.info("Task %s failed after it was abandoned: %s", task.label, message)
+                return
+            self._current_task = None
             self.busy = False
-            self.message.setText(message)
-            if on_error:
-                on_error(message)
-            if interactive:
-                QMessageBox.warning(self, "Job Server", message)
-            self._run_pending_task()
+            try:
+                self.message.setText(message)
+                if on_error:
+                    on_error(message)
+                if interactive:
+                    QMessageBox.warning(self, "Job Server", message)
+            except Exception:
+                LOG.exception("Reporting the failure of %s failed", task.label)
+            finally:
+                self._run_pending_task()
 
         connect_queued(task.signals.finished, finished, self, (object,), cleanup=(task.signals.finished, task.signals.failed))
         connect_queued(task.signals.failed, failed, self, (str,), cleanup=(task.signals.finished, task.signals.failed))
         self.pool.start(task)
+
+    def _recover_stuck_task(self):
+        """Let the window go on when a worker call never returns.
+
+        Every operation, the 3-second refresh included, runs one at a time on
+        a single worker thread. Its requests time out, but a call that blocks
+        anyway would otherwise leave the window frozen on its last message
+        (such as "Server is not responding") until it was restarted. Past
+        STUCK_SECONDS the call is written to gui.log with its stack and
+        abandoned: its result is ignored, and later work gets a new thread
+        and a new connection. Server start, stop and restart wait longer on
+        purpose and are never abandoned (refresh does not run during them).
+        """
+        if not self.busy and self._pending_tasks:
+            LOG.warning("Queued operations were left waiting with no task running; starting them")
+            self._run_pending_task()
+            return
+        task = self._current_task
+        if not self.busy or task is None:
+            return
+        # A task the pool never started counts from when it was queued.
+        spent = time.monotonic() - (task.started or task.queued)
+        if spent < STUCK_SECONDS:
+            return
+        LOG.error(
+            "Task %s has not returned after %.0f s; abandoning it. Worker stack:\n%s",
+            task.label, spent, thread_stack(task.thread_ident),
+        )
+        task.abandoned = True
+        self._tasks.discard(task)
+        self._current_task = None
+        self.busy = False
+        # The blocked thread keeps the old pool and connection; nothing new waits on them.
+        self.pool = QThreadPool(self)
+        self.pool.setMaxThreadCount(1)
+        self.client = JobServerClient(self.client.url, self.client.key_path, timeout=self.client.timeout)
+        self.message.setText(
+            f"An earlier request did not return after {spent:.0f} s and was abandoned; "
+            "details are in File > Open Logs > gui.log."
+        )
+        self._run_pending_task()
 
     def _run_pending_task(self):
         if self._pending_tasks and not self.busy:
@@ -983,6 +1076,7 @@ class Dashboard(QDialog):
                 title, started = self._active_lifecycle
                 self.message.setText(f"{title} ({time.monotonic() - started:.0f}s)")
             return
+        self._recover_stuck_task()
 
         page = self.job_page
         since = self.history_rows[-1][0] if self.history_rows else 0
@@ -1027,6 +1121,9 @@ class Dashboard(QDialog):
                 return {"health": health, "error": str(exc)}
 
         def display(data):
+            if self._refresh_failures:
+                LOG.info("Refresh recovered after %d failure(s)", self._refresh_failures)
+                self._refresh_failures = 0
             if self._pending_lifecycle:
                 return
             if data.get("offline"):
@@ -1147,7 +1244,12 @@ class Dashboard(QDialog):
             self._update_account_actions()
             self._refresh_activity()
 
-        def unavailable(_):
+        def unavailable(reason):
+            self._refresh_failures += 1
+            if self._refresh_failures == 1 or self._refresh_failures % 100 == 0:
+                LOG.warning(
+                    "Refresh failed (%d in a row): %s", self._refresh_failures, reason
+                )
             if self._pending_lifecycle:
                 return
             self.message.setText("Server is not responding. Check Server > Start or File > Open Logs.")
