@@ -47,7 +47,8 @@ def test_refresh_failure_is_written_to_gui_log(dashboard, monkeypatch):
     monkeypatch.setattr(dashboard.client, "request", timed_out)
     dashboard.refresh()
     assert settle(dashboard, lambda: not dashboard.busy)
-    assert "not responding" in dashboard.message.text()
+    assert dashboard.connection_status.text() == "Server offline"
+    assert "Open Logs" in dashboard.resources.text()
     flush_log()
     text = (dashboard.settings.root / "logs" / "gui.log").read_text(encoding="utf-8")
     assert "window" in text and "opened" in text
