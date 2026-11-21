@@ -817,6 +817,42 @@ def test_right_click_holds_releases_and_changes_a_waiting_job_reservation(dashbo
     ]
 
 
+
+def test_right_click_gives_a_finished_job_to_another_enabled_user(dashboard, monkeypatch):
+    from PySide6.QtWidgets import QInputDialog
+
+    dashboard.client.key_path.parent.mkdir(parents=True, exist_ok=True)
+    dashboard.client.key_path.write_text("synthetic placeholder")
+    dashboard.fill(dashboard.jobs, [("friendly name", "admin", "DONE", 0, "job-id")], ["job-id"])
+    dashboard.jobs.setCurrentCell(0, 0)
+    dashboard.job_records = {"job-id": {"state": "DONE", "owner_id": "u-admin"}}
+    dashboard.usernames = {"u-admin": "admin", "u-bob": "bob", "u-carol": "carol"}
+    dashboard.user_records = {
+        "u-admin": {"id": "u-admin", "username": "admin", "enabled": True},
+        "u-carol": {"id": "u-carol", "username": "carol", "enabled": False},
+        "u-bob": {"id": "u-bob", "username": "bob", "enabled": True},
+    }
+    dashboard._update_job_actions()
+    assert dashboard.owner_action in dashboard._context_actions(dashboard.jobs)
+    assert dashboard.owner_action.isEnabled()
+    offered, calls = [], []
+    monkeypatch.setattr(dashboard, "task", lambda call, *args, **kwargs: call())
+    monkeypatch.setattr(dashboard.client, "request", lambda *args: calls.append(args))
+
+    def choose(parent, title, label, items, *args):
+        offered.append((label, list(items)))
+        return items[0], True
+
+    monkeypatch.setattr(QInputDialog, "getItem", staticmethod(choose))
+    dashboard.change_owner()
+    assert offered[0][1] == ["bob"], "Neither the current owner nor a disabled user is offered"
+    assert "now owned by admin" in offered[0][0]
+    assert calls == [("POST", "/admin/jobs/job-id/owner", {"user_id": "u-bob"})]
+    dashboard.job_records["job-id"]["state"] = "UPLOADING"
+    dashboard._update_job_actions()
+    assert not dashboard.owner_action.isEnabled()
+
+
 def test_reserved_and_elapsed_columns_read_plainly():
     from job_server.ui.dashboard import elapsed_text, reserved_text
 

@@ -337,6 +337,7 @@ class Dashboard(QDialog):
         self.release_action = action(queue, "Release hold", lambda: self.hold(False))
         self.force_action = action(queue, "Force run, ignoring budget...", lambda: self.force_run(True))
         self.unforce_action = action(queue, "Cancel force-run request", lambda: self.force_run(False))
+        self.owner_action = action(queue, "Change owner...", self.change_owner)
         self.cancel_action = action(queue, "Cancel selected job...", self.cancel)
         self.lost_action = action(queue, "Mark stuck job as lost...", self.mark_lost)
         help_menu = self.menu_bar.addMenu("Help")
@@ -665,7 +666,7 @@ class Dashboard(QDialog):
             return [
                 self.detail_action, self.folder_action, self.copy_job_action, None,
                 self.priority_action, self.resources_action, self.hold_action, self.release_action,
-                self.force_action, self.unforce_action, None,
+                self.force_action, self.unforce_action, self.owner_action, None,
                 self.cancel_action, self.lost_action,
             ]
         if table is self.users:
@@ -2420,6 +2421,9 @@ class Dashboard(QDialog):
         self.release_action.setEnabled(pending and held)
         self.force_action.setEnabled(pending and not record.get("force_run", False))
         self.unforce_action.setEnabled(pending and record.get("force_run", False))
+        self.owner_action.setEnabled(
+            identifier is not None and record.get("state", record.get("display_state")) != "UPLOADING"
+        )
 
     def open_job_details(self):
         identifier = self.selected(self.jobs)
@@ -2513,6 +2517,35 @@ class Dashboard(QDialog):
             lambda: self.client.request("POST", f"/admin/jobs/{identifier}/force-run", {"force_run": value}),
             lambda _: self.refresh(),
             success_message=requested if value else "Force-run request cancelled.",
+        )
+
+    def change_owner(self):
+        """Hand the selected job to another enabled user."""
+        identifier = self.selected(self.jobs)
+        if identifier is None or not self.require_admin_registration():
+            return
+        current = self.job_records.get(identifier, {}).get("owner_id")
+        users = sorted(
+            (u for u in self.user_records.values() if u.get("enabled") and u["id"] != current),
+            key=lambda u: u["username"].lower(),
+        )
+        if not users:
+            self.message.setText("No other enabled user to give this job to.")
+            return
+        names = [u["username"] for u in users]
+        name, accepted = QInputDialog.getItem(
+            self, "Change owner",
+            f"Give this job, now owned by {self.usernames.get(current, '(deleted user)')}, to:\n"
+            "It moves to their job list and counts against their running limit.",
+            names, 0, False,
+        )
+        if not accepted:
+            return
+        user_id = users[names.index(name)]["id"]
+        self.task(
+            lambda: self.client.request("POST", f"/admin/jobs/{identifier}/owner", {"user_id": user_id}),
+            lambda _: self.refresh(),
+            success_message=f"Job given to {name}.",
         )
 
     def cancel(self):
