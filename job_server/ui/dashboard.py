@@ -272,6 +272,7 @@ class Dashboard(QDialog):
         layout.addWidget(notice)
         self.message = QLabel("Server is OFF until you explicitly start it.")
         self.message.setWordWrap(True)
+        self.message.setFixedHeight(self.message.fontMetrics().lineSpacing() * 2)
         layout.addWidget(self.message)
         self.tabs = QTabWidget()
         layout.addWidget(self.tabs)
@@ -1209,7 +1210,6 @@ class Dashboard(QDialog):
             if self._pending_lifecycle:
                 return
             if data.get("offline"):
-                self.message.setText("Server is OFF. Choose Server > Start.")
                 self.set_status("offline", "Server is OFF", "Choose Server > Start when ready.")
                 self._clear_dashboard()
                 return
@@ -1334,7 +1334,6 @@ class Dashboard(QDialog):
                 )
             if self._pending_lifecycle:
                 return
-            self.message.setText("Server is not responding. Check Server > Start or File > Open Logs.")
             self.set_status(
                 "offline", "Server offline",
                 "No daemon answers on this port. Choose Server > Start; "
@@ -1847,9 +1846,8 @@ class Dashboard(QDialog):
             self.set_status("warning", title + " — queued", "Waiting for the current operation.")
         self.task(call, finished, on_error=failed, on_start=starting)
 
-    def _server_started(self, message):
-        self.message.setText(message)
-        self.set_status("online", "Server is running", "Ready for connections.")
+    def _server_started(self, _):
+        self.set_status("online", "Server is running", "Ready for connections. Active jobs are preserved.")
         self.refresh()
 
     def start_daemon(self):
@@ -1913,7 +1911,6 @@ class Dashboard(QDialog):
         from ..lifecycle import stop_and_wait
 
         def stopped(_):
-            self.message.setText("Server is OFF. Active job supervisors are preserved.")
             self.set_status("offline", "Server is OFF", "Active job supervisors are preserved.")
 
         fallback = self._offer_process_stop()
