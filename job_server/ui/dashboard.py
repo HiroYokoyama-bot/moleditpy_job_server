@@ -247,7 +247,6 @@ class Dashboard(QDialog):
         self._pending_lifecycle = set()
         # A save changed the file under a running daemon and no start followed.
         self._unapplied = False
-        self._active_lifecycle = None
         self.setup_dialog = None
         self._setup_checked = False
         self.detail_dialog = None
@@ -1158,9 +1157,6 @@ class Dashboard(QDialog):
     def refresh(self):
         self._watch_current_task()
         if self._pending_lifecycle:
-            if self._active_lifecycle:
-                title, started = self._active_lifecycle
-                self.message.setText(f"{title} ({time.monotonic() - started:.0f}s)")
             return
         self._recover_stuck_task()
 
@@ -1833,21 +1829,17 @@ class Dashboard(QDialog):
         action.setEnabled(False)
 
         def starting():
-            self._active_lifecycle = (title, time.monotonic())
-            self.message.setText(title)
             self.set_status("warning", title, "Waiting for the server to confirm completion.")
 
         def finished(value):
             self._pending_lifecycle.discard(name)
             self.save_settings_button.setEnabled(not self._pending_lifecycle)
-            self._active_lifecycle = None
             action.setEnabled(True)
             done(value)
 
         def failed(message):
             self._pending_lifecycle.discard(name)
             self.save_settings_button.setEnabled(not self._pending_lifecycle)
-            self._active_lifecycle = None
             action.setEnabled(True)
             self.set_status("warning", "Server operation failed", message)
 

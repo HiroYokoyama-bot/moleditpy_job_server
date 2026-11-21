@@ -234,6 +234,33 @@ def test_restart_waits_for_stop_before_starting(dashboard, monkeypatch):
     assert dashboard.restart_action.isEnabled()
 
 
+def test_restarting_state_shows_only_in_the_banner(dashboard, monkeypatch):
+    import threading
+    import time
+    from PySide6.QtWidgets import QApplication
+
+    release = threading.Event()
+    bound_refresh = dashboard.refresh
+    monkeypatch.setattr(dashboard, "require_admin_registration", lambda: True)
+    monkeypatch.setattr("job_server.lifecycle.stop_and_wait", lambda *args: release.wait(5))
+    monkeypatch.setattr(dashboard, "_start_daemon", lambda: "Server is running.")
+    monkeypatch.setattr(dashboard, "refresh", lambda: None)
+    try:
+        dashboard.restart_daemon()
+        assert "Restarting" in dashboard.connection_status.text()
+        assert "Restarting" not in dashboard.message.text()
+        bound_refresh()
+        assert "Restarting" in dashboard.connection_status.text()
+        assert "Restarting" not in dashboard.message.text()
+    finally:
+        release.set()
+    deadline = time.monotonic() + 5
+    while dashboard.busy and time.monotonic() < deadline:
+        QApplication.processEvents()
+        time.sleep(0.01)
+    assert dashboard.restart_action.isEnabled()
+
+
 def test_refresh_displays_names_status_and_local_access_time(dashboard, monkeypatch):
     dashboard.client.key_path.parent.mkdir(parents=True, exist_ok=True)
     dashboard.client.key_path.write_text("synthetic placeholder")
