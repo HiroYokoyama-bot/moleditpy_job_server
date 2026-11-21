@@ -212,7 +212,14 @@ def test_offline_refresh_is_a_normal_off_state(dashboard, monkeypatch):
     monkeypatch.setattr(dashboard, "task", lambda work, display, **kwargs: display(work()))
     dashboard.refresh()
     assert dashboard.connection_status.text() == "Server is OFF"
-    assert dashboard.message.text() == "Server is OFF. Choose Server > Start."
+    assert "Choose Server > Start" in dashboard.resources.text()
+    assert "Choose Server > Start" not in dashboard.message.text()
+
+
+def test_message_line_keeps_a_fixed_height(dashboard):
+    two_lines = dashboard.message.fontMetrics().lineSpacing() * 2
+    assert dashboard.message.minimumHeight() == two_lines
+    assert dashboard.message.maximumHeight() == two_lines
 
 
 def test_restart_waits_for_stop_before_starting(dashboard, monkeypatch):
