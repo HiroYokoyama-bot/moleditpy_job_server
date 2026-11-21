@@ -263,19 +263,15 @@ class Dashboard(QDialog):
         self.menu_bar = QMenuBar(self)
         layout.setMenuBar(self.menu_bar)
         self._menus()
-        notice = QLabel(
-            "Trusted users only. Jobs share the service OS account; CPU/RAM reservations are advisory.\n"
-            "WARNING: Never expose to the public internet. Localhost, private LAN or private Tailscale only; "
-            "no Funnel or public port forwarding. Use a low-privilege OS account."
-        )
-        notice.setWordWrap(True)
-        layout.addWidget(notice)
-        self.message = QLabel("Server is OFF until you explicitly start it.")
+        # The banner shows the server state, and the setup wizard and the docs
+        # carry the exposure warning. This line answers what the user
+        # just did; it sits under the tabs so a message cannot push them about.
+        self.message = QLabel("")
         self.message.setWordWrap(True)
         self.message.setFixedHeight(self.message.fontMetrics().lineSpacing() * 2)
-        layout.addWidget(self.message)
         self.tabs = QTabWidget()
         layout.addWidget(self.tabs)
+        layout.addWidget(self.message)
         self._dashboard()
         self._users()
         self._activity()
