@@ -249,6 +249,7 @@ async function queueControls() {
     if(url.includes('/log?'))return response({text:'',next_offset:0});
     if(url==='/api/v1/admin/jobs/pending/priority'){priority=JSON.parse(options.body).priority;calls.push(url);return response({});}
     if(url==='/api/v1/admin/jobs/pending/force-run'){forced=JSON.parse(options.body).force_run;calls.push(url);return response({});}
+    if(url==='/api/v1/admin/users')return response([{id:'alice',username:'alice',role:'admin',enabled:true}]);
     throw new Error('Unexpected URL '+url);
   });
   signedIn(app);app.state.me.role='admin';
@@ -266,6 +267,75 @@ async function queueControls() {
   app.state.me.role='user';const count=calls.length;
   await app.call('queueControl')('force');assert.equal(calls.length,count);
   await app.call('detail')('pending');assert.equal(app.get('#job-controls').hidden,true);
+}
+async function priorityKeptAcrossRefresh() {
+  let priority=0;const sent=[];
+  const app=await application(async(url,options)=>{
+    if(url==='/api/v1/jobs/pending')return response({...job('pending'),state:'PENDING',display_state:'PENDING',priority,force_run:false});
+    if(url.includes('/log?'))return response({text:'',next_offset:0});
+    if(url==='/api/v1/admin/users')return response([{id:'alice',username:'alice',role:'admin',enabled:true}]);
+    if(url==='/api/v1/admin/jobs/pending/priority'){priority=JSON.parse(options.body).priority;sent.push(priority);return response({});}
+    throw new Error('Unexpected URL '+url);
+  });
+  signedIn(app);app.state.me.role='admin';
+  await app.call('detail')('pending');
+  const box=app.get('#job-priority');assert.equal(box.value,0);
+  box.value='40';box.listeners.input();
+  await app.call('detail')('pending',false);await app.call('detail')('pending',false);
+  assert.equal(box.value,'40','A refresh leaves an edited priority alone after the box loses focus');
+  await app.call('queueControl')('priority');assert.deepEqual(sent,[40]);
+  priority=7;await app.call('detail')('pending',false);
+  assert.equal(box.value,7,'Once set, the box follows the server again');
+  box.value='99';box.listeners.input();await app.call('detail')('pending');
+  assert.equal(box.value,7,'Opening a job again discards an unsent edit');
+}
+async function holdFromTheWeb() {
+  let held=false;const sent=[];
+  const app=await application(async(url,options)=>{
+    if(url==='/api/v1/jobs/pending')return response({...job('pending'),state:'PENDING',display_state:held?'HELD':'PENDING',held,priority:0,force_run:false});
+    if(url.includes('/log?'))return response({text:'',next_offset:0});
+    if(url==='/api/v1/jobs/pending/hold'){held=JSON.parse(options.body).held;sent.push(held);return response({});}
+    throw new Error('Unexpected URL '+url);
+  });
+  signedIn(app);
+  await app.call('detail')('pending');
+  const button=app.get('#hold-job');
+  assert.equal(button.hidden,false,'The owner can hold a waiting job');
+  assert.equal(app.get('#owner-controls').hidden,true,'Only an administrator changes owners');
+  assert.equal(button.textContent,'Hold');
+  await app.call('holdJob')();assert.equal(button.textContent,'Release hold');
+  await app.call('holdJob')();assert.equal(button.textContent,'Hold');
+  assert.deepEqual(sent,[true,false]);
+  held=false;app.state.jobInfo={...app.state.jobInfo,state:'RUNNING'};
+  await app.call('holdJob')();assert.deepEqual(sent,[true,false],'Only a waiting job is held');
+}
+async function ownerFromTheWeb() {
+  let owner='alice',userReads=0;const sent=[];
+  const users=[{id:'alice',username:'alice',role:'admin',enabled:true},{id:'bob',username:'bob',role:'user',enabled:true},{id:'carol',username:'carol',role:'user',enabled:false}];
+  const app=await application(async(url,options)=>{
+    if(url==='/api/v1/jobs/done')return response({...job('done'),owner_id:owner,state:'DONE',display_state:'DONE'});
+    if(url.includes('/log?'))return response({text:'',next_offset:0});
+    if(url==='/api/v1/jobs/done/files')return response([]);
+    if(url==='/api/v1/admin/users'){userReads++;return response(users);}
+    if(url==='/api/v1/admin/jobs/done/owner'){owner=JSON.parse(options.body).user_id;sent.push(owner);return response({});}
+    throw new Error('Unexpected URL '+url);
+  });
+  signedIn(app);app.state.me.role='admin';
+  await app.call('detail')('done');
+  assert.equal(app.get('#owner-controls').hidden,false,'A finished job can still change hands');
+  const select=app.get('#job-owner');
+  assert.deepEqual(select.children.map(option=>option.value),['alice','bob'],'Disabled users are not offered');
+  assert.equal(select.value,'alice');
+  await app.call('detail')('done',false);assert.equal(userReads,1,'A refresh reuses the user list');
+  select.value='bob';app.context.confirm=()=>false;await app.call('changeOwner')();assert.deepEqual(sent,[]);
+  const asked=[];app.context.confirm=text=>{asked.push(text);return true;};
+  await app.call('changeOwner')();
+  assert.deepEqual(sent,['bob']);assert.match(asked[0],/bob/);
+  assert.equal(select.value,'bob');
+  await app.call('detail')('done');assert.equal(userReads,2,'Opening a job reads the list again');
+  app.state.authenticated=Date.now()/1000-600;
+  await app.call('detail')('done');assert.equal(userReads,2,'A stale sign-in does not ask for it');
+  assert.deepEqual(select.children.map(option=>option.value),['alice','bob'],'The last list stays instead of failing');
 }
 async function expiredDownload() {
   const app=await application(async url=>{throw new Error('Unexpected URL '+url);});
@@ -527,7 +597,7 @@ async function overviewMeters() {
   assert.ok(Math.abs(skewed[1].x-100)<0.5);
   assert.match(app.call('dialArc')(0.5),/^M9\.98 34\.02A17 17 0 0 1 22\.00 5\.00$/);
 }
-const cases={overviewMeters,jobRows,browserHistory,steadyLists,userChip,insecureContext,sessionRestore,submittedAndCompleted,queuedRefresh,queueControls,expiredDownload,keylessLogin,authentication,refresh,details,accountsPolling,accountsOrdering,loginView,connectionFailure,connectionTimeout,sharedQueue};
+const cases={priorityKeptAcrossRefresh,holdFromTheWeb,ownerFromTheWeb,overviewMeters,jobRows,browserHistory,steadyLists,userChip,insecureContext,sessionRestore,submittedAndCompleted,queuedRefresh,queueControls,expiredDownload,keylessLogin,authentication,refresh,details,accountsPolling,accountsOrdering,loginView,connectionFailure,connectionTimeout,sharedQueue};
 async function runCases() {
   const selected=process.argv[3]==='all'?Object.keys(cases):[process.argv[3]];
   for(const name of selected){
