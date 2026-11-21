@@ -372,3 +372,66 @@ def test_an_administrator_changes_a_waiting_job_reservation_within_the_budget(cl
     client.app.state.scheduler.tick()
     assert launches == [running, waiting]
     assert change(client, admin, waiting, "resources", {"cpus_per_task": 1, "memory_mb": 1}).status_code == 409
+
+
+def jobs_of(client, identity):
+    return [job["id"] for job in client.get("/api/v1/jobs", headers=identity["headers"]).json()]
+
+
+@pytest.mark.parametrize("state", ["PENDING", "RUNNING", "DONE", "FAILED", "CANCELLED", "LOST"])
+def test_an_administrator_hands_a_submitted_job_to_another_user(client, admin, alice, state):
+    sent = pending(client, admin)
+    with client.app.state.db.transaction() as c:
+        c.execute("UPDATE jobs SET state=? WHERE id=?", (state, sent))
+    response = change(client, admin, sent, "owner", {"user_id": alice["user"]["id"]})
+    assert response.status_code == 200, response.text
+    assert response.json()["owner_id"] == alice["user"]["id"]
+    assert jobs_of(client, alice) == [sent]
+    assert sent not in jobs_of(client, admin)
+    event = client.app.state.db.one(
+        "SELECT actor,details FROM events WHERE event='job_owner_changed' AND job_id=?", (sent,)
+    )
+    assert event["actor"] == admin["user"]["id"]
+    assert json.loads(event["details"]) == {"previous": admin["user"]["id"], "owner": alice["user"]["id"]}
+
+
+def test_the_new_owner_counts_the_job_against_their_running_limit(client, admin, alice, launches):
+    client.app.state.settings.max_active_per_user = 1
+    running = pending(client, alice)
+    client.app.state.scheduler.tick()
+    assert launches == [running]
+    sent = pending(client, admin)
+    assert change(client, admin, sent, "owner", {"user_id": alice["user"]["id"]}).status_code == 200
+    client.app.state.scheduler.tick()
+    assert launches == [running]
+
+
+def test_giving_a_job_to_its_owner_records_nothing(client, admin, alice):
+    identifier = pending(client, alice)
+    assert change(client, admin, identifier, "owner", {"user_id": alice["user"]["id"]}).status_code == 200
+    assert not client.app.state.db.one("SELECT 1 FROM events WHERE event='job_owner_changed'")
+
+
+def test_owner_changes_only_by_a_fresh_administrator(client, admin, alice):
+    identifier = pending(client, alice)
+    other = enroll(client, "other-owner", "user")
+    body = {"user_id": other["user"]["id"]}
+    assert change(client, alice, identifier, "owner", body).status_code == 403
+    with client.app.state.db.transaction() as c:
+        c.execute("UPDATE sessions SET authenticated_at=? WHERE user_id=?", (time.time() - 301, admin["user"]["id"]))
+    assert change(client, admin, identifier, "owner", body).status_code == 401
+    assert client.app.state.db.one("SELECT owner_id FROM jobs WHERE id=?", (identifier,))["owner_id"] == alice["user"]["id"]
+
+
+def test_owner_change_refuses_uploads_and_unusable_users(client, admin, alice):
+    uploading = reserve(client, alice).json()["id"]
+    other = enroll(client, "disabled-owner", "user")
+    assert change(client, admin, uploading, "owner", {"user_id": other["user"]["id"]}).status_code == 409
+    identifier = pending(client, alice)
+    assert client.post(f"/api/v1/admin/users/{other['user']['id']}/disable", headers=admin["headers"]).status_code == 200
+    for user_id in (other["user"]["id"], "no-such-user"):
+        response = change(client, admin, identifier, "owner", {"user_id": user_id})
+        assert response.status_code == 422
+        assert response.json()["code"] == "invalid_owner"
+    assert change(client, admin, identifier, "owner", {"user_id": 5}).status_code == 400
+    assert client.app.state.db.one("SELECT owner_id FROM jobs WHERE id=?", (identifier,))["owner_id"] == alice["user"]["id"]

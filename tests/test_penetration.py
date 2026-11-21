@@ -103,6 +103,7 @@ PROTECTED = [
     ("POST", f"/admin/jobs/{NOBODY}/priority", {"priority": 1}),
     ("POST", f"/admin/jobs/{NOBODY}/resources", {"cpus_per_task": 0, "memory_mb": 0}),
     ("POST", f"/admin/jobs/{NOBODY}/force-run", {"force_run": True}),
+    ("POST", f"/admin/jobs/{NOBODY}/owner", {"user_id": NOBODY}),
     ("POST", f"/admin/jobs/{NOBODY}/mark-lost", {}),
     ("POST", "/admin/jobs/move-finished", {}),
 ]
@@ -509,6 +510,7 @@ ADMIN_ONLY = [
     ("POST", "/admin/queue/pause", {"paused": True}),
     ("POST", "/admin/jobs/{job}/priority", {"priority": 5}),
     ("POST", "/admin/jobs/{job}/force-run", {"force_run": True}),
+    ("POST", "/admin/jobs/{job}/owner", {"user_id": "{self}"}),
     ("POST", "/admin/jobs/{job}/mark-lost", {}),
     ("POST", "/admin/jobs/{job}/resources", {"cpus_per_task": 0, "memory_mb": 0}),
     ("POST", "/admin/jobs/move-finished", {}),
@@ -673,7 +675,7 @@ QUEUE_NEIGHBOUR = [
     ("GET", "/jobs/{job}"), ("GET", "/jobs/{job}/log"), ("GET", "/jobs/{job}/files"),
     ("GET", "/jobs/{job}/archive"), ("GET", "/jobs/{job}/uploads"), ("POST", "/jobs/{job}/cancel"),
     ("GET", "/browse?path={job}"), ("POST", "/admin/jobs/{job}/priority"),
-    ("POST", "/admin/jobs/{job}/force-run"),
+    ("POST", "/admin/jobs/{job}/force-run"), ("POST", "/admin/jobs/{job}/owner"),
 ]
 HOSTILE_NAME = "<img src=x onerror=alert(1)>"
 
@@ -704,12 +706,15 @@ def test_shared_queue_gives_a_neighbour_nothing_to_act_on(client, alice):
 
 @pytest.mark.parametrize(("method", "path"), QUEUE_NEIGHBOUR, ids=[f"{m} {p}" for m, p in QUEUE_NEIGHBOUR])
 def test_job_seen_in_the_queue_is_still_out_of_reach(client, alice, method, path):
-    _, _, theirs = waiting_neighbours(client, alice)
-    body = {"priority": 9, "force_run": True} if method == "POST" else None
+    bob, _, theirs = waiting_neighbours(client, alice)
+    body = None
+    if method == "POST":
+        body = {"user_id": alice["user"]["id"]} if path.endswith("/owner") else {"priority": 9, "force_run": True}
     response = call(client, method, path.format(job=theirs), alice["headers"], body)
     assert response.status_code == (403 if "/admin/" in path else 404)
-    row = client.app.state.db.one("SELECT state,priority,force_run FROM jobs WHERE id=?", (theirs,))
+    row = client.app.state.db.one("SELECT state,priority,force_run,owner_id FROM jobs WHERE id=?", (theirs,))
     assert (row["state"], row["priority"], row["force_run"]) == ("PENDING", 0, 0)
+    assert row["owner_id"] == bob["user"]["id"]
 
 
 @pytest.mark.parametrize("query", [
