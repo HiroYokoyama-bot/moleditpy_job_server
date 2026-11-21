@@ -456,10 +456,7 @@ class Dashboard(QDialog):
             metrics.addWidget(card, index // 3, index % 3)
         layout.addLayout(metrics)
         under = QHBoxLayout()
-        note = QLabel(
-            "Point at a line to read its value. Gaps are times the server was not running. "
-            "CPU and memory reservations are advisory."
-        )
+        note = QLabel("Point at a line to read its value. Gaps are times the server was not running.")
         note.setEnabled(False)
         under.addWidget(note, 1)
         # The span the lines cover; the server keeps the longest, so switching is instant.

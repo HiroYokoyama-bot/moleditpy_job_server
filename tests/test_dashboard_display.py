@@ -121,10 +121,7 @@ def test_trend_note_ends_with_the_advisory(dashboard):
         label.text() for label in dashboard.findChildren(QLabel)
         if label.text().startswith("Point at a line")
     ]
-    assert notes == [
-        "Point at a line to read its value. Gaps are times the server was not running. "
-        "CPU and memory reservations are advisory."
-    ]
+    assert notes == ["Point at a line to read its value. Gaps are times the server was not running."]
 
 
 def test_about_dialog_shows_version_icon_and_repository(dashboard, monkeypatch):
