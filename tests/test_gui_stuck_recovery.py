@@ -146,3 +146,122 @@ def test_failure_text_names_the_exception():
     assert failure_text(TimeoutError("timed out")) == "TimeoutError: timed out"
     assert failure_text(TimeoutError()) == "TimeoutError"
     assert failure_text(ValueError("ValueError: already named")) == "ValueError: already named"
+
+
+def read_log(dashboard):
+    flush_log()
+    return (dashboard.settings.root / "logs" / "gui.log").read_text(encoding="utf-8")
+
+
+def no_signals(monkeypatch):
+    """Connect nothing, as if every queued signal from the worker were lost."""
+    from PySide6.QtCore import QObject
+    from job_server.ui import dashboard as module
+
+    monkeypatch.setattr(module, "connect_queued", lambda signal, callback, owner, *a, **k: QObject(owner))
+
+
+def test_lost_result_is_delivered_by_the_refresh_timer(dashboard, monkeypatch):
+    from job_server.ui import dashboard as module
+
+    no_signals(monkeypatch)
+    got = []
+    dashboard.task(lambda: 5, got.append, interactive=False)
+    task = dashboard._current_task
+    assert settle(dashboard, lambda: task.outcome is not None)
+    settle(dashboard, lambda: False, timeout=0.1)
+    assert got == [] and dashboard.busy  # the signal never came
+
+    monkeypatch.setattr(module, "DELIVERY_SECONDS", 0)
+    monkeypatch.setattr(dashboard.client, "request", lambda *a, **k: (_ for _ in ()).throw(TimeoutError()))
+    dashboard.refresh()
+    assert got == [5]
+    assert "never reached the window" in read_log(dashboard)
+
+
+def test_lost_failure_is_delivered_during_a_server_operation(dashboard, monkeypatch):
+    """Start/stop/restart stop refresh, so a lost result there must still arrive."""
+    from job_server.ui import dashboard as module
+
+    no_signals(monkeypatch)
+    errors = []
+
+    def broken():
+        raise ValueError("daemon did not start")
+
+    dashboard.task(broken, interactive=False, on_error=errors.append)
+    task = dashboard._current_task
+    assert settle(dashboard, lambda: task.outcome is not None)
+    dashboard._pending_lifecycle.add("start")
+    monkeypatch.setattr(module, "DELIVERY_SECONDS", 0)
+    dashboard.refresh()
+    assert errors == ["daemon did not start"]
+    assert not dashboard.busy
+
+
+def test_result_is_delivered_once(dashboard, monkeypatch):
+    from job_server.ui import dashboard as module
+
+    got = []
+    dashboard.task(lambda: 7, got.append, interactive=False)
+    task = dashboard._current_task
+    assert settle(dashboard, lambda: got == [7])
+    # A late timer pass over the same task must not show it again.
+    monkeypatch.setattr(module, "DELIVERY_SECONDS", 0)
+    task.deliver["finished"](7)
+    assert got == [7]
+
+
+def test_call_the_pool_never_starts_runs_on_a_thread(dashboard, monkeypatch):
+    from job_server.ui import dashboard as module
+
+    pool_starts = []
+    monkeypatch.setattr(dashboard.pool, "start", pool_starts.append)
+    monkeypatch.setattr(module, "START_SECONDS", 0)
+    got = []
+    dashboard.task(lambda: "first", got.append, interactive=False)
+    assert len(pool_starts) == 1
+    monkeypatch.setattr(dashboard.client, "request", lambda *a, **k: (_ for _ in ()).throw(TimeoutError()))
+    dashboard._watch_current_task()
+    assert dashboard._own_threads
+    assert settle(dashboard, lambda: got == ["first"] and not dashboard.busy)
+    # Later calls go straight to their own thread.
+    dashboard.task(lambda: "second", got.append, interactive=False)
+    assert settle(dashboard, lambda: got == ["first", "second"] and not dashboard.busy)
+    assert len(pool_starts) == 1
+    assert "was not started by the worker pool" in read_log(dashboard)
+
+
+def test_a_call_runs_once_even_if_two_threads_try(dashboard):
+    from job_server.ui.dashboard import Task
+
+    calls = []
+    task = Task(lambda: calls.append(1))
+    task.run()
+    task.run()
+    assert calls == [1]
+
+
+def test_thread_start_failure_is_reported(dashboard, monkeypatch):
+    errors = []
+    dashboard._own_threads = True
+
+    def cannot_start(self):
+        raise RuntimeError("can't start new thread")
+
+    monkeypatch.setattr(threading.Thread, "start", cannot_start)
+    dashboard.task(lambda: None, interactive=False, on_error=errors.append)
+    assert errors and "could not start a worker thread" in errors[0]
+    assert not dashboard.busy
+
+
+def test_never_started_call_is_named_in_the_log(dashboard, monkeypatch):
+    from job_server.ui import dashboard as module
+
+    monkeypatch.setattr(dashboard.pool, "start", lambda task: None)
+    monkeypatch.setattr(module, "START_SECONDS", 10_000)
+    monkeypatch.setattr(module, "STUCK_SECONDS", 0)
+    dashboard.task(lambda: None, interactive=False)
+    dashboard._recover_stuck_task()
+    assert not dashboard.busy
+    assert "it never started on a worker thread" in read_log(dashboard)
