@@ -114,14 +114,10 @@ def test_account_menu_is_available_on_every_tab(dashboard, monkeypatch):
         assert entry in account.actions() and entry in dashboard._context_actions(dashboard.users)
 
 
-def test_trend_note_ends_with_the_advisory(dashboard):
+def test_meters_have_no_hint_line(dashboard):
     from PySide6.QtWidgets import QLabel
 
-    notes = [
-        label.text() for label in dashboard.findChildren(QLabel)
-        if label.text().startswith("Point at a line")
-    ]
-    assert notes == ["Point at a line to read its value. Gaps are times the server was not running."]
+    assert not [label for label in dashboard.findChildren(QLabel) if "Point at a line" in label.text()]
 
 
 def test_about_dialog_shows_version_icon_and_repository(dashboard, monkeypatch):
@@ -223,11 +219,38 @@ def test_messages_go_to_a_status_bar_under_the_tabs(dashboard):
     assert dashboard.status_bar.geometry().top() >= dashboard.tabs.geometry().bottom()
     tabs, width = dashboard.tabs.geometry(), dashboard.width()
     long = "Saved " + "a-very-long-folder-name/" * 40 + "settings.json. Choose Server > Restart to apply."
-    dashboard.message.setText(long)
-    QApplication.processEvents()
-    assert dashboard.tabs.geometry() == tabs, "A message never moves the tabs"
-    assert dashboard.width() == width, "A long message does not widen the window"
-    assert dashboard.message.toolTip() == long
+    bar = dashboard.status_bar.geometry()
+    for text in (long, "Unable to check setup:\nsecond line\nthird line", ""):
+        dashboard.message.setText(text)
+        QApplication.processEvents()
+        assert dashboard.tabs.geometry() == tabs, "A message never moves the tabs"
+        assert dashboard.status_bar.geometry() == bar, "Nor resizes the status bar"
+        assert dashboard.width() == width, "Nor widens the window"
+        assert "\n" not in dashboard.message.text()
+        assert dashboard.message.toolTip() == text
+    for index in range(dashboard.tabs.count()):
+        dashboard.tabs.setCurrentIndex(index)
+        QApplication.processEvents()
+        assert dashboard.status_bar.geometry() == bar
+
+
+def test_the_banner_keeps_its_height_whatever_the_state(dashboard):
+    from PySide6.QtWidgets import QApplication
+
+    dashboard.resize(900, 700)
+    dashboard.show()
+    heights = set()
+    for state in (
+        ("offline", "Server is OFF", "Choose Server > Start when ready."),
+        ("online", "Server is running", "Ready for connections. Active jobs are preserved."),
+        ("offline", "Server offline", "Nothing answers on this port. Choose Server > Start, or see File > Open Logs."),
+        ("warning", "Restarting", "A hint long enough to wrap twice. " * 8),
+        ("unknown", "Checking server", "Waiting for the first health check."),
+    ):
+        dashboard.set_status(*state)
+        QApplication.processEvents()
+        heights.add(dashboard.status_banner.height())
+    assert len(heights) == 1
 
 
 def test_restart_waits_for_stop_before_starting(dashboard, monkeypatch):

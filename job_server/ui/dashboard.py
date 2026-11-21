@@ -79,8 +79,8 @@ class Signals(QObject):
 
 
 class StatusMessage(QLabel):
-    """One line of the status bar: a long message is cut at the window edge and
-    shown whole as the tooltip, instead of widening the window."""
+    """One line of the status bar: a long or multi-line message is cut to one
+    line and shown whole as the tooltip, so it never resizes the window."""
 
     def __init__(self):
         super().__init__("")
@@ -88,7 +88,7 @@ class StatusMessage(QLabel):
         self.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
 
     def setText(self, text):
-        super().setText(text)
+        super().setText(" ".join(str(text).split()))
         self.setToolTip(text)
 
 
@@ -288,6 +288,7 @@ class Dashboard(QDialog):
         self.status_bar.setStyleSheet("QStatusBar { border-top: 1px solid palette(mid); }")
         self.message = StatusMessage()
         self.status_bar.addWidget(self.message, 1)
+        self.status_bar.setFixedHeight(self.status_bar.sizeHint().height())
         layout.addWidget(self.status_bar)
         self._dashboard()
         self._users()
@@ -473,9 +474,7 @@ class Dashboard(QDialog):
             metrics.addWidget(card, index // 3, index % 3)
         layout.addLayout(metrics)
         under = QHBoxLayout()
-        note = QLabel("Point at a line to read its value. Gaps are times the server was not running.")
-        note.setEnabled(False)
-        under.addWidget(note, 1)
+        under.addStretch(1)
         # The span the lines cover; the server keeps the longest, so switching is instant.
         self.span_buttons = QButtonGroup(self)
         for seconds, label in SPANS:
@@ -557,8 +556,9 @@ class Dashboard(QDialog):
         self.description_label.setTextFormat(Qt.TextFormat.RichText)
         self.description_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         text.addWidget(self.description_label)
-        self.resources = QLabel()
-        self.resources.setWordWrap(True)
+        # One line, like the status bar: a hint that wrapped grew the banner and
+        # moved everything under it each time the server state changed.
+        self.resources = StatusMessage()
         text.addWidget(self.resources)
         row.addLayout(text, 1)
         self.status_checked = QLabel()
@@ -1347,8 +1347,7 @@ class Dashboard(QDialog):
                 return
             self.set_status(
                 "offline", "Server offline",
-                "No daemon answers on this port. Choose Server > Start; "
-                "if it stays offline, check File > Open Logs.",
+                "Nothing answers on this port. Choose Server > Start, or see File > Open Logs.",
             )
             self._clear_dashboard()
 

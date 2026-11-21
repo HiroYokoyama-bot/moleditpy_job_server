@@ -14,7 +14,8 @@ function randomId() {
   const hex=[...bytes].map(v=>v.toString(16).padStart(2,'0')).join('');
   return [hex.slice(0,8),hex.slice(8,12),hex.slice(12,16),hex.slice(16,20),hex.slice(20)].join('-');
 }
-function message(text) { $('#notice').textContent = text; $('#notice').hidden = !text; }
+// A bar fixed to the foot of the window: a message never pushes the page about. Cut to one line; the whole text is its tooltip.
+function message(text) { $('#notice').textContent = text; $('#notice').title = text; $('#notice').hidden = !text; }
 // Memory is stored in MB but shown and entered in GiB (1024 MB, the unit Windows calls GB).
 function gb(mb) { return typeof mb==='number' ? (mb/1024).toFixed(1) : '—'; }
 function date(value) { return value ? new Date(value*1000).toLocaleString() : '—'; }
