@@ -6,6 +6,7 @@ import logging
 import os
 import sqlite3
 import subprocess
+import threading
 import time
 import uuid
 from collections import deque
@@ -62,6 +63,13 @@ from ..settings import Settings, pc_description, pc_resources, pc_size_label
 #: Seconds a worker call may run before the window gives up on it. Its requests
 #: time out after 3 s each, so only a call that is truly stuck gets this far.
 STUCK_SECONDS = 60
+#: Seconds a call may wait for the worker thread to pick it up. Calls run one
+#: at a time, so the thread is idle whenever one is queued; past this the pool
+#: is not starting work at all.
+START_SECONDS = 10
+#: Seconds a returned call's result may take to reach the window through its
+#: queued signal before the refresh timer delivers it instead.
+DELIVERY_SECONDS = 2
 
 
 class Signals(QObject):
@@ -83,12 +91,19 @@ class Task(QRunnable):
         self.label = label or getattr(call, "__qualname__", repr(call))
         self.queued = time.monotonic()
         self.started = None  # monotonic time the worker began, None while queued
+        self.ended = None  # monotonic time the call returned or raised
+        # ("finished", value) or ("failed", message), kept so the window can
+        # still collect it if the queued signal carrying it never arrives.
+        self.outcome = None
         self.thread_ident = None
         self.abandoned = False
+        # Taken by whichever thread runs the call, so a call handed to a
+        # second thread after the pool failed to start it never runs twice.
+        self._claim = threading.Lock()
 
     def run(self):
-        import threading
-
+        if not self._claim.acquire(blocking=False):
+            return
         self.thread_ident = threading.get_ident()
         self.started = time.monotonic()
         try:
@@ -99,8 +114,14 @@ class Task(QRunnable):
                 time.monotonic() - self.started, failure_text(exc),
                 exc_info=not isinstance(exc, (OSError, ClientError, ValueError)),
             )
-            self.signals.failed.emit(str(exc) or type(exc).__name__)
+            message = str(exc) or type(exc).__name__
+            # ended first: the window reads outcome from another thread.
+            self.ended = time.monotonic()
+            self.outcome = ("failed", message)
+            self.signals.failed.emit(message)
             return
+        self.ended = time.monotonic()
+        self.outcome = ("finished", result)
         self.signals.finished.emit(result)
 
 
@@ -215,6 +236,9 @@ class Dashboard(QDialog):
         LOG.info("Job Server window %s opened (pid %d)", PLUGIN_VERSION, os.getpid())
         self.pool = QThreadPool(self)
         self.pool.setMaxThreadCount(1)
+        # Set once the pool fails to start a call: from then on each call
+        # gets its own daemon thread.
+        self._own_threads = False
         self._tasks = set()
         self._current_task = None
         self._refresh_failures = 0
@@ -982,8 +1006,13 @@ class Dashboard(QDialog):
         task = Task(call)
         self._tasks.add(task)
         self._current_task = task
+        delivered = []
 
         def finished(value):
+            # The signal and the timer's fallback can both deliver a result.
+            if delivered:
+                return
+            delivered.append(True)
             self._tasks.discard(task)
             if task.abandoned:
                 LOG.info("Task %s finished after it was abandoned; result ignored", task.label)
@@ -1003,6 +1032,9 @@ class Dashboard(QDialog):
                 self._run_pending_task()
 
         def failed(message):
+            if delivered:
+                return
+            delivered.append(True)
             self._tasks.discard(task)
             if task.abandoned:
                 LOG.info("Task %s failed after it was abandoned: %s", task.label, message)
@@ -1020,9 +1052,60 @@ class Dashboard(QDialog):
             finally:
                 self._run_pending_task()
 
-        connect_queued(task.signals.finished, finished, self, (object,), cleanup=(task.signals.finished, task.signals.failed))
-        connect_queued(task.signals.failed, failed, self, (str,), cleanup=(task.signals.finished, task.signals.failed))
-        self.pool.start(task)
+        task.deliver = {"finished": finished, "failed": failed}
+        cleanup = (task.signals.finished, task.signals.failed)
+        task.receivers = (
+            connect_queued(task.signals.finished, finished, self, (object,), cleanup=cleanup),
+            connect_queued(task.signals.failed, failed, self, (str,), cleanup=cleanup),
+        )
+        if self._own_threads:
+            self._start_thread(task)
+        else:
+            self.pool.start(task)
+
+    def _start_thread(self, task):
+        """Run ``task`` on a plain daemon thread instead of the Qt pool."""
+        try:
+            threading.Thread(target=task.run, name="job-server-window-task", daemon=True).start()
+        except RuntimeError as exc:
+            LOG.error("Task %s could not start a thread: %s", task.label, failure_text(exc))
+            task.deliver["failed"](f"The window could not start a worker thread: {failure_text(exc)}")
+
+    def _watch_current_task(self):
+        """Collect a result whose signal was lost, and start a call the pool did not.
+
+        Runs on every 3-second tick, server start/stop/restart included. A
+        Job Server window on Windows once went 17 hours without trouble and
+        then never showed another refresh: each call was reported stuck with
+        no Python frame on its thread, so it either never started or returned
+        without the window hearing of it. Both cases are handled here instead
+        of waiting out STUCK_SECONDS on every call.
+        """
+        task = self._current_task
+        if not self.busy or task is None:
+            return
+        now = time.monotonic()
+        if task.outcome is not None:
+            if now - task.ended >= DELIVERY_SECONDS:
+                LOG.warning(
+                    "Task %s returned %.0f s ago but its result never reached the window; "
+                    "delivering it from the refresh timer", task.label, now - task.ended,
+                )
+                # The lost signal would also have deleted these.
+                for receiver in task.receivers:
+                    receiver.deleteLater()
+                kind, value = task.outcome
+                task.deliver[kind](value)
+            return
+        if task.started is None and now - task.queued >= START_SECONDS:
+            LOG.error(
+                "Task %s was not started by the worker pool after %.0f s (%d active pool "
+                "thread(s), %d Python thread(s)); running it and later calls on separate threads",
+                task.label, now - task.queued, self.pool.activeThreadCount(), threading.active_count(),
+            )
+            self.pool.tryTake(task)
+            self._own_threads = True
+            self._start_thread(task)
 
     def _recover_stuck_task(self):
         """Let the window go on when a worker call never returns.
@@ -1047,17 +1130,19 @@ class Dashboard(QDialog):
         spent = time.monotonic() - (task.started or task.queued)
         if spent < STUCK_SECONDS:
             return
-        LOG.error(
-            "Task %s has not returned after %.0f s; abandoning it. Worker stack:\n%s",
-            task.label, spent, thread_stack(task.thread_ident),
-        )
+        if task.started is None:
+            where = "it never started on a worker thread"
+        else:
+            where = "Worker stack:\n" + thread_stack(task.thread_ident)
+        LOG.error("Task %s has not returned after %.0f s; abandoning it. %s", task.label, spent, where)
         task.abandoned = True
         self._tasks.discard(task)
         self._current_task = None
         self.busy = False
         # The blocked thread keeps the old pool and connection; nothing new waits on them.
-        self.pool = QThreadPool(self)
-        self.pool.setMaxThreadCount(1)
+        if not self._own_threads:
+            self.pool = QThreadPool(self)
+            self.pool.setMaxThreadCount(1)
         self.client = JobServerClient(self.client.url, self.client.key_path, timeout=self.client.timeout)
         self.message.setText(
             f"An earlier request did not return after {spent:.0f} s and was abandoned; "
@@ -1071,6 +1156,7 @@ class Dashboard(QDialog):
             self.task(call, on_ok, success_message=success_message, on_error=on_error, on_start=on_start)
 
     def refresh(self):
+        self._watch_current_task()
         if self._pending_lifecycle:
             if self._active_lifecycle:
                 title, started = self._active_lifecycle
