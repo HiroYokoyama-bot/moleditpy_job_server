@@ -213,10 +213,21 @@ def test_offline_refresh_is_a_normal_off_state(dashboard, monkeypatch):
     assert "Choose Server > Start" not in dashboard.message.text()
 
 
-def test_message_line_keeps_a_fixed_height(dashboard):
-    two_lines = dashboard.message.fontMetrics().lineSpacing() * 2
-    assert dashboard.message.minimumHeight() == two_lines
-    assert dashboard.message.maximumHeight() == two_lines
+def test_messages_go_to_a_status_bar_under_the_tabs(dashboard):
+    from PySide6.QtWidgets import QApplication
+
+    assert dashboard.message.parent() is dashboard.status_bar
+    dashboard.resize(900, 700)
+    dashboard.show()
+    QApplication.processEvents()
+    assert dashboard.status_bar.geometry().top() >= dashboard.tabs.geometry().bottom()
+    tabs, width = dashboard.tabs.geometry(), dashboard.width()
+    long = "Saved " + "a-very-long-folder-name/" * 40 + "settings.json. Choose Server > Restart to apply."
+    dashboard.message.setText(long)
+    QApplication.processEvents()
+    assert dashboard.tabs.geometry() == tabs, "A message never moves the tabs"
+    assert dashboard.width() == width, "A long message does not widen the window"
+    assert dashboard.message.toolTip() == long
 
 
 def test_restart_waits_for_stop_before_starting(dashboard, monkeypatch):

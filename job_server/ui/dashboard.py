@@ -38,6 +38,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QInputDialog,
+    QStatusBar,
     QMessageBox,
     QMenuBar,
     QPushButton,
@@ -75,6 +76,20 @@ DELIVERY_SECONDS = 2
 class Signals(QObject):
     finished = Signal(object)
     failed = Signal(str)
+
+
+class StatusMessage(QLabel):
+    """One line of the status bar: a long message is cut at the window edge and
+    shown whole as the tooltip, instead of widening the window."""
+
+    def __init__(self):
+        super().__init__("")
+        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+
+    def setText(self, text):
+        super().setText(text)
+        self.setToolTip(text)
 
 
 def failure_text(exc):
@@ -264,14 +279,16 @@ class Dashboard(QDialog):
         layout.setMenuBar(self.menu_bar)
         self._menus()
         # The banner shows the server state, and the setup wizard and the docs
-        # carry the exposure warning. This line answers what the user
-        # just did; it sits under the tabs so a message cannot push them about.
-        self.message = QLabel("")
-        self.message.setWordWrap(True)
-        self.message.setFixedHeight(self.message.fontMetrics().lineSpacing() * 2)
+        # carry the exposure warning. The status bar at the foot answers what
+        # the user just did, on every tab, and never moves the tabs.
         self.tabs = QTabWidget()
         layout.addWidget(self.tabs)
-        layout.addWidget(self.message)
+        self.status_bar = QStatusBar(self)
+        self.status_bar.setSizeGripEnabled(False)
+        self.status_bar.setStyleSheet("QStatusBar { border-top: 1px solid palette(mid); }")
+        self.message = StatusMessage()
+        self.status_bar.addWidget(self.message, 1)
+        layout.addWidget(self.status_bar)
         self._dashboard()
         self._users()
         self._activity()
