@@ -23,8 +23,8 @@ from .instance import InstanceLock
 from .jobs import Jobs
 from .scheduler import Scheduler, host_usage
 from .schemas import (
-    Challenge, Enrollment, ForceRun, Hold, JobResources, JobSpec, Login, PasswordChange, PasswordReset, Pause, Priority,
-    RoleChange, Token, UserCreate,
+    Challenge, Enrollment, ForceRun, Hold, JobResources, JobSpec, Login, OwnerChange, PasswordChange, PasswordReset, Pause,
+    Priority, RoleChange, Token, UserCreate,
 )
 from .settings import Settings, pc_description
 
@@ -238,6 +238,7 @@ def create_app(settings=None, dispatch=True):
                 "force_run",
                 "hold",
                 "edit_resources",
+                "change_owner",
                 "job_folders",
                 "password_change",
             ],
@@ -602,6 +603,32 @@ def create_app(settings=None, dispatch=True):
             c.execute("UPDATE jobs SET spec=? WHERE id=?", (json.dumps(spec), job_id))
             db.event(c, "job_resources_changed", p["user_id"], job_id,
                      previous=previous, resources=spec["resources"])
+        return jobs.public(jobs.authorize(job_id, p))
+
+    @app.post(prefix + "/admin/jobs/{job_id}/owner")
+    def change_owner(job_id: str, body: OwnerChange, p=Depends(admin)):
+        """Hand a submitted job to another user, such as one an administrator sent for them.
+
+        Who may see the job and whose running limit it counts against follow
+        the owner. A finished job already moved stays in the folder it was
+        moved to; one not yet moved goes to its new owner's folder.
+        """
+        from .auth import DELETED_ROLE
+
+        with db.transaction() as c:
+            auth.admin(p)
+            job = jobs.authorize(job_id, p)
+            if job["state"] == "UPLOADING":
+                reject(409, "job_uploading", "Wait until the job's files are uploaded")
+            user = c.execute(
+                "SELECT id,role,enabled FROM users WHERE id=?", (body.user_id,)
+            ).fetchone()
+            if not user or user[1] == DELETED_ROLE or not user[2]:
+                reject(422, "invalid_owner", "Choose an enabled user")
+            if user[0] != job["owner_id"]:
+                c.execute("UPDATE jobs SET owner_id=? WHERE id=?", (user[0], job_id))
+                db.event(c, "job_owner_changed", p["user_id"], job_id,
+                         previous=job["owner_id"], owner=user[0])
         return jobs.public(jobs.authorize(job_id, p))
 
     @app.post(prefix + "/admin/jobs/{job_id}/force-run")

@@ -38,6 +38,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QInputDialog,
+    QStatusBar,
     QMessageBox,
     QMenuBar,
     QPushButton,
@@ -75,6 +76,20 @@ DELIVERY_SECONDS = 2
 class Signals(QObject):
     finished = Signal(object)
     failed = Signal(str)
+
+
+class StatusMessage(QLabel):
+    """One line of the status bar: a long or multi-line message is cut to one
+    line and shown whole as the tooltip, so it never resizes the window."""
+
+    def __init__(self):
+        super().__init__("")
+        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+
+    def setText(self, text):
+        super().setText(" ".join(str(text).split()))
+        self.setToolTip(text)
 
 
 def failure_text(exc):
@@ -263,19 +278,18 @@ class Dashboard(QDialog):
         self.menu_bar = QMenuBar(self)
         layout.setMenuBar(self.menu_bar)
         self._menus()
-        notice = QLabel(
-            "Trusted users only. Jobs share the service OS account; CPU/RAM reservations are advisory.\n"
-            "WARNING: Never expose to the public internet. Localhost, private LAN or private Tailscale only; "
-            "no Funnel or public port forwarding. Use a low-privilege OS account."
-        )
-        notice.setWordWrap(True)
-        layout.addWidget(notice)
-        self.message = QLabel("Server is OFF until you explicitly start it.")
-        self.message.setWordWrap(True)
-        self.message.setFixedHeight(self.message.fontMetrics().lineSpacing() * 2)
-        layout.addWidget(self.message)
+        # The banner shows the server state, and the setup wizard and the docs
+        # carry the exposure warning. The status bar at the foot answers what
+        # the user just did, on every tab, and never moves the tabs.
         self.tabs = QTabWidget()
         layout.addWidget(self.tabs)
+        self.status_bar = QStatusBar(self)
+        self.status_bar.setSizeGripEnabled(False)
+        self.status_bar.setStyleSheet("QStatusBar { border-top: 1px solid palette(mid); }")
+        self.message = StatusMessage()
+        self.status_bar.addWidget(self.message, 1)
+        self.status_bar.setFixedHeight(self.status_bar.sizeHint().height())
+        layout.addWidget(self.status_bar)
         self._dashboard()
         self._users()
         self._activity()
@@ -341,6 +355,7 @@ class Dashboard(QDialog):
         self.release_action = action(queue, "Release hold", lambda: self.hold(False))
         self.force_action = action(queue, "Force run, ignoring budget...", lambda: self.force_run(True))
         self.unforce_action = action(queue, "Cancel force-run request", lambda: self.force_run(False))
+        self.owner_action = action(queue, "Change owner...", self.change_owner)
         self.cancel_action = action(queue, "Cancel selected job...", self.cancel)
         self.lost_action = action(queue, "Mark stuck job as lost...", self.mark_lost)
         help_menu = self.menu_bar.addMenu("Help")
@@ -459,12 +474,7 @@ class Dashboard(QDialog):
             metrics.addWidget(card, index // 3, index % 3)
         layout.addLayout(metrics)
         under = QHBoxLayout()
-        note = QLabel(
-            "Point at a line to read its value. Gaps are times the server was not running. "
-            "CPU and memory reservations are advisory."
-        )
-        note.setEnabled(False)
-        under.addWidget(note, 1)
+        under.addStretch(1)
         # The span the lines cover; the server keeps the longest, so switching is instant.
         self.span_buttons = QButtonGroup(self)
         for seconds, label in SPANS:
@@ -546,8 +556,9 @@ class Dashboard(QDialog):
         self.description_label.setTextFormat(Qt.TextFormat.RichText)
         self.description_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         text.addWidget(self.description_label)
-        self.resources = QLabel()
-        self.resources.setWordWrap(True)
+        # One line, like the status bar: a hint that wrapped grew the banner and
+        # moved everything under it each time the server state changed.
+        self.resources = StatusMessage()
         text.addWidget(self.resources)
         row.addLayout(text, 1)
         self.status_checked = QLabel()
@@ -669,7 +680,7 @@ class Dashboard(QDialog):
             return [
                 self.detail_action, self.folder_action, self.copy_job_action, None,
                 self.priority_action, self.resources_action, self.hold_action, self.release_action,
-                self.force_action, self.unforce_action, None,
+                self.force_action, self.unforce_action, self.owner_action, None,
                 self.cancel_action, self.lost_action,
             ]
         if table is self.users:
@@ -1336,8 +1347,7 @@ class Dashboard(QDialog):
                 return
             self.set_status(
                 "offline", "Server offline",
-                "No daemon answers on this port. Choose Server > Start; "
-                "if it stays offline, check File > Open Logs.",
+                "Nothing answers on this port. Choose Server > Start, or see File > Open Logs.",
             )
             self._clear_dashboard()
 
@@ -2424,6 +2434,9 @@ class Dashboard(QDialog):
         self.release_action.setEnabled(pending and held)
         self.force_action.setEnabled(pending and not record.get("force_run", False))
         self.unforce_action.setEnabled(pending and record.get("force_run", False))
+        self.owner_action.setEnabled(
+            identifier is not None and record.get("state", record.get("display_state")) != "UPLOADING"
+        )
 
     def open_job_details(self):
         identifier = self.selected(self.jobs)
@@ -2517,6 +2530,35 @@ class Dashboard(QDialog):
             lambda: self.client.request("POST", f"/admin/jobs/{identifier}/force-run", {"force_run": value}),
             lambda _: self.refresh(),
             success_message=requested if value else "Force-run request cancelled.",
+        )
+
+    def change_owner(self):
+        """Hand the selected job to another enabled user."""
+        identifier = self.selected(self.jobs)
+        if identifier is None or not self.require_admin_registration():
+            return
+        current = self.job_records.get(identifier, {}).get("owner_id")
+        users = sorted(
+            (u for u in self.user_records.values() if u.get("enabled") and u["id"] != current),
+            key=lambda u: u["username"].lower(),
+        )
+        if not users:
+            self.message.setText("No other enabled user to give this job to.")
+            return
+        names = [u["username"] for u in users]
+        name, accepted = QInputDialog.getItem(
+            self, "Change owner",
+            f"Give this job, now owned by {self.usernames.get(current, '(deleted user)')}, to:\n"
+            "It moves to their job list and counts against their running limit.",
+            names, 0, False,
+        )
+        if not accepted:
+            return
+        user_id = users[names.index(name)]["id"]
+        self.task(
+            lambda: self.client.request("POST", f"/admin/jobs/{identifier}/owner", {"user_id": user_id}),
+            lambda _: self.refresh(),
+            success_message=f"Job given to {name}.",
         )
 
     def cancel(self):

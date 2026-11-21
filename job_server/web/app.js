@@ -14,7 +14,8 @@ function randomId() {
   const hex=[...bytes].map(v=>v.toString(16).padStart(2,'0')).join('');
   return [hex.slice(0,8),hex.slice(8,12),hex.slice(12,16),hex.slice(16,20),hex.slice(20)].join('-');
 }
-function message(text) { $('#notice').textContent = text; $('#notice').hidden = !text; }
+// A bar fixed to the foot of the window: a message never pushes the page about. Cut to one line; the whole text is its tooltip.
+function message(text) { $('#notice').textContent = text; $('#notice').title = text; $('#notice').hidden = !text; }
 // Memory is stored in MB but shown and entered in GiB (1024 MB, the unit Windows calls GB).
 function gb(mb) { return typeof mb==='number' ? (mb/1024).toFixed(1) : '—'; }
 function date(value) { return value ? new Date(value*1000).toLocaleString() : '—'; }
@@ -203,7 +204,7 @@ function saveSession() {
 function clearSession() {
   try {sessionStorage.removeItem(SESSION_KEY);} catch {}
   state.generation++;state.detailRequest++;state.accountsRequest++;state.accountRequest++;state.activityRequest++;state.browseRequest++;
-  Object.assign(state,{token:null,expires:0,authenticated:0,me:null,capabilities:null,job:null,jobInfo:null,queueBusy:false,offset:0,page:0,paused:false,refreshPending:false,browsePath:'',resetUser:null,names:null});
+  Object.assign(state,{token:null,expires:0,authenticated:0,me:null,capabilities:null,job:null,jobInfo:null,queueBusy:false,offset:0,page:0,paused:false,refreshPending:false,browsePath:'',resetUser:null,names:null,ownerUsers:null,priorityEdited:false});
   $('#signin').hidden=false;$('#user-chip').hidden=true;$('#signout').hidden=true;$('#accounts-nav').hidden=true;$('#account-nav').hidden=true;$('#pause').hidden=true;
   if($('#reset-dialog').open)$('#reset-dialog').close();clearPasswordForms();
   for(const id of ['jobs-body','queue-body','users-body','devices-body','result-files','my-devices-body','browser-body','activity-body'])clearList($('#'+id));
@@ -461,7 +462,13 @@ async function detail(id,reset=true,{record=true}={}){
   const job=await api('GET','/jobs/'+id);if(!current())return;state.jobInfo=job;
   if(reset&&job.state!=='UPLOADING')safe(()=>browse(id,''));
   $('#job-controls').hidden=state.me?.role!=='admin'||job.state!=='PENDING';
-  if(document.activeElement!==$('#job-priority'))$('#job-priority').value=job.priority??0;
+  // The page refreshes every few seconds: an edited priority stays until it is set or another job opens.
+  if(reset)state.priorityEdited=false;
+  if(!state.priorityEdited&&document.activeElement!==$('#job-priority'))$('#job-priority').value=job.priority??0;
+  $('#hold-job').hidden=job.state!=='PENDING';$('#hold-job').textContent=job.held?'Release hold':'Hold';
+  $('#hold-job').disabled=state.queueBusy;
+  $('#owner-controls').hidden=state.me?.role!=='admin'||job.state==='UPLOADING';
+  if(!$('#owner-controls').hidden)await ownerChoices(job,reset);if(!current())return;
   $('#force-job').textContent=job.force_run?'Cancel force request':'Force run…';
   $('#force-job').disabled=$('#set-priority').disabled=state.queueBusy;
   setText($('#detail-name'),job.spec.name+' · '+job.display_state+(typeof job.queue_ahead==='number'?' · '+ahead(job.queue_ahead):''));setText($('#detail-id'),id);
@@ -500,12 +507,55 @@ async function queueControl(action) {
   try {
     await api('POST','/admin/jobs/'+encodeURIComponent(id)+'/'+path,body);
     requireSession(generation);
+    if(action==='priority')state.priorityEdited=false;
     if(state.job===id)await detail(id,false);
   } finally {
     if(generation===state.generation){state.queueBusy=false;$('#force-job').disabled=$('#set-priority').disabled=false;}
   }
 }
 $('#set-priority').addEventListener('click',()=>safe(()=>queueControl('priority')));
+$('#job-priority').addEventListener('input',()=>{state.priorityEdited=true;});
+$('#hold-job').addEventListener('click',()=>safe(()=>holdJob()));
+$('#set-owner').addEventListener('click',()=>safe(()=>changeOwner()));
+async function holdJob(){
+  const job=state.jobInfo,id=state.job,generation=state.generation;
+  if(state.queueBusy||!job||job.id!==id||job.state!=='PENDING')return;
+  state.queueBusy=true;$('#hold-job').disabled=true;
+  try {
+    await api('POST','/jobs/'+encodeURIComponent(id)+'/hold',{held:!job.held});
+    requireSession(generation);
+    if(state.job===id)await detail(id,false);
+  } finally {
+    if(generation===state.generation){state.queueBusy=false;$('#hold-job').disabled=false;}
+  }
+}
+// Enabled users to hand a job to; the current owner stays listed, even when disabled, so the choice shows who has it.
+// Read when a job opens, not on every refresh: administrator reads need a recent sign-in, and the
+// refresh must keep working after that lapses.
+async function ownerChoices(job,reload){
+  if((reload||!state.ownerUsers)&&Date.now()/1000-state.authenticated<=240){
+    state.ownerUsers=await api('GET','/admin/users');
+    state.names=Object.fromEntries(state.ownerUsers.map(user=>[user.id,user.username]));
+  }
+  const users=state.ownerUsers||[];
+  const select=$('#job-owner'),chosen=document.activeElement===select?select.value:job.owner_id;
+  const options=users.filter(user=>user.enabled||user.id===job.owner_id).map(user=>{const option=document.createElement('option');option.value=user.id;option.textContent=user.username+(user.role==='admin'?' (admin)':'')+(user.enabled?'':' (disabled)');return option;});
+  if(!users.some(user=>user.id===job.owner_id)){const option=document.createElement('option');option.value=job.owner_id;option.textContent='(deleted user)';options.push(option);}
+  select.replaceChildren(...options);select.value=chosen;
+}
+async function changeOwner(){
+  const job=state.jobInfo,id=state.job,generation=state.generation,user_id=$('#job-owner').value;
+  if(state.queueBusy||state.me?.role!=='admin'||!job||job.id!==id||!user_id||user_id===job.owner_id)return;
+  if(!confirm('Give this job to '+(state.names?.[user_id]||'this user')+'? It leaves your job list if it was yours.'))return;
+  state.queueBusy=true;$('#set-owner').disabled=true;
+  try {
+    await api('POST','/admin/jobs/'+encodeURIComponent(id)+'/owner',{user_id});
+    requireSession(generation);
+    if(state.job===id)await detail(id,false);
+  } finally {
+    if(generation===state.generation){state.queueBusy=false;$('#set-owner').disabled=false;}
+  }
+}
 $('#force-job').addEventListener('click',()=>safe(()=>queueControl('force')));
 async function download(id,entry){
   const generation=state.generation;
