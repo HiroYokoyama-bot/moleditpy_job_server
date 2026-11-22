@@ -187,7 +187,12 @@ def main():
             return run_gui(args.config)
         settings = Settings.load(args.config)
         if hasattr(args, "handler"):
-            return args.handler(args, settings)
+            from .cli import remember_sessions
+
+            try:
+                return args.handler(args, settings)
+            finally:
+                remember_sessions()
         if args.action == "serve":
             from .server_app import serve
 

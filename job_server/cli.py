@@ -126,11 +126,84 @@ def _verify(settings):
     verify_local_daemon(settings.root, settings.port)
 
 
+def session_path(settings):
+    """The token the last command was issued, so the next one need not sign in again.
+
+    Every local client shares the loopback address's sign-in limit (20 a
+    minute), and a command line that signed in for each command would use it
+    up within a few commands. The token is protected like the device key
+    next to it (DPAPI on Windows, owner-only elsewhere) and expires with it.
+    """
+    return settings.root / "identity" / "cli-session.json"
+
+
+_CLIENTS = []
+
+
 def _client(settings, timeout=10):
     from .client import JobServerClient
     from .lifecycle import local_url
 
-    return JobServerClient(local_url(settings), key_path(settings), timeout=timeout)
+    client = JobServerClient(local_url(settings), key_path(settings), timeout=timeout)
+    client.cached_session = False
+    session = _load_session(settings)
+    if session and session["expires"] > time.time() + 10:
+        client.token, client.expires = session["token"], session["expires"]
+        client.authenticated_at, client.server_id = session["authenticated_at"], session["server_id"]
+        client.cached_session = True
+    _CLIENTS.append((settings, client))
+    return client
+
+
+def _load_session(settings):
+    from .credentials import load_key
+
+    path = session_path(settings)
+    try:
+        data = path.read_bytes()
+        if data.startswith(b"DPAPI\n"):
+            from .credentials import dpapi
+
+            data = dpapi(data[6:], decrypt=True)
+        session = json.loads(data)
+        if os.name != "nt" and path.stat().st_mode & 0o077:
+            raise ValueError("session file is readable by others")
+        # Only for the device it was issued to.
+        if session["device_id"] != load_key(key_path(settings))["device_id"]:
+            raise ValueError("session belongs to another device")
+        return session
+    except FileNotFoundError:
+        return None
+    except Exception:
+        path.unlink(missing_ok=True)
+        return None
+
+
+def forget_session(settings):
+    session_path(settings).unlink(missing_ok=True)
+
+
+def remember_sessions():
+    """Save the newest token a command was issued; called once the command ends."""
+    from .credentials import dpapi, load_key
+    from .files import atomic_write
+
+    saved = set()
+    for settings, client in reversed(_CLIENTS):
+        path = session_path(settings)
+        if path in saved or not client.token or not key_path(settings).is_file():
+            continue
+        saved.add(path)
+        try:
+            data = json.dumps({
+                "device_id": load_key(key_path(settings))["device_id"],
+                "server_id": client.server_id, "token": client.token, "expires": client.expires,
+                "authenticated_at": client.authenticated_at,
+            }).encode()
+            atomic_write(path, b"DPAPI\n" + dpapi(data) if os.name == "nt" else data)
+        except Exception:
+            path.unlink(missing_ok=True)  # an unsaved token only costs a sign-in
+    _CLIENTS.clear()
 
 
 def _signed_client(args, settings):
@@ -146,7 +219,15 @@ def _request(client, method, path, body=None):
     from .client import ClientError
 
     try:
-        return client.request(method, path, body)
+        try:
+            return client.request(method, path, body)
+        except ClientError as exc:
+            if exc.status != 401 or not getattr(client, "cached_session", False):
+                raise
+            # A saved token the server no longer accepts: sign in once with the key.
+            client.cached_session = False
+            client.token, client.expires = None, 0
+            return client.request(method, path, body)
     except ClientError as exc:
         if exc.status == 401:
             raise CliError(
@@ -201,7 +282,10 @@ def _stop(args, settings):
         try:
             _verify(settings)
             # Signed shutdown records who stopped the server in the event log.
-            stop_and_wait(_client(settings), settings.root)
+            # Signed in afresh: a stale saved token must not turn into a failure.
+            client = _client(settings)
+            client.token, client.expires, client.cached_session = None, 0, False
+            stop_and_wait(client, settings.root)
             return True
         except Exception as exc:
             if not args.force:
@@ -245,7 +329,7 @@ def cmd_status(args, settings):
     if key_path(settings).is_file():
         try:
             _verify(settings)
-            queue = _client(settings).request("GET", "/system/resources")
+            queue = _request(_client(settings), "GET", "/system/resources")
         except Exception:
             queue = None  # status still answers when the saved sign-in is stale
     result = {
@@ -379,6 +463,7 @@ def cmd_login(args, settings):
         client.enroll(username, password)
     except ClientError as exc:
         path.unlink(missing_ok=True)
+        forget_session(settings)
         raise CliError(f"Sign-in failed: {exc}") from None
     me = _request(client, "GET", "/me")
     from .credentials import load_key
@@ -402,6 +487,7 @@ def cmd_logout(args, settings):
         _request(client, "POST", f"/me/devices/{device}/revoke")
         print(f"Device {_short(device)} revoked on the server.")
     path.unlink()
+    forget_session(settings)
     print("Signed out; the saved device key is deleted.")
     if args.local_only:
         print("The device stays registered on the server until an administrator revokes it.")
