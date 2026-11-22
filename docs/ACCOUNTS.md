@@ -79,3 +79,15 @@ server's data folder, and there is no network equivalent.
 **Activity** in the desktop window and **Recent activity** in the Web UI show sign-ins,
 account changes and job events, newest first. The log records who acted and on what, and
 never records a password. It is not deleted automatically.
+
+Password sign-ins, and refused password or device sign-ins, record the address they came
+from. A device's routine sign-ins with its key are not logged one by one; each device instead
+keeps when and from where it last signed in, shown as **Last from** in the device lists.
+
+The address is the connection the server received. Through Tailscale Serve or another proxy
+on the server PC that is always `127.0.0.1`, so for a loopback connection the server also
+records the login Tailscale Serve reports in its `Tailscale-User-Login` header, shown in
+brackets. Serve removes a client's own copy of that header, but any program on the server PC
+can connect to the loopback port and send one, so it is a record of what the connection
+claimed. It never grants access, and a direct LAN connection's header is ignored. Tagged
+Tailscale devices send no login.

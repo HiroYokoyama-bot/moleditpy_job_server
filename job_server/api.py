@@ -1,3 +1,4 @@
+import ipaddress
 import json
 import re
 import time
@@ -27,6 +28,9 @@ from .schemas import (
     Priority, RoleChange, Token, UserCreate,
 )
 from .settings import Settings, pc_description
+
+#: A login name as Serve sends it: printable ASCII (RFC 2047 encodes the rest).
+TAILSCALE_LOGIN = re.compile(r"[!-~]+")
 
 
 def create_app(settings=None, dispatch=True):
@@ -182,6 +186,25 @@ def create_app(settings=None, dispatch=True):
     def client(request):
         return request.client.host if request.client else "unknown"
 
+    def tailscale_user(request):
+        """The Tailscale login Serve forwarded this request for, or None.
+
+        Serve removes a client's own copy of the header before forwarding, but
+        only a request that reached us through Serve went through it. Serve
+        connects over loopback, so a direct LAN connection's header is ignored;
+        on loopback any local program could still set it, so it is recorded as
+        what the connection claimed, never trusted for access.
+        """
+        try:
+            if not ipaddress.ip_address(client(request)).is_loopback:
+                return None
+        except ValueError:
+            return None
+        value = request.headers.get("tailscale-user-login", "").strip()
+        if not value or len(value) > 256 or not TAILSCALE_LOGIN.fullmatch(value):
+            return None
+        return value
+
     def limited(request):
         auth.rate_limit(client(request))
 
@@ -249,14 +272,14 @@ def create_app(settings=None, dispatch=True):
     @app.post(prefix + "/auth/login")
     def login(body: Login, request: Request):
         limited(request)
-        return auth.login(body.username, body.password, address=client(request))
+        return auth.login(body.username, body.password, address=client(request), tailscale_user=tailscale_user(request))
 
     @app.post(prefix + "/auth/web-login")
     def web_login(body: Login, request: Request):
         if not settings.web_ui:
             reject(404, "not_found", "Web sign-in is disabled")
         limited(request)
-        return auth.login(body.username, body.password, web=True, address=client(request))
+        return auth.login(body.username, body.password, web=True, address=client(request), tailscale_user=tailscale_user(request))
 
     @app.post(prefix + "/auth/logout")
     def logout(p=Depends(principal)):
@@ -270,12 +293,12 @@ def create_app(settings=None, dispatch=True):
     @app.post(prefix + "/auth/challenge")
     def challenge(body: Challenge, request: Request):
         limited(request)
-        return auth.challenge(body.device_id, address=client(request))
+        return auth.challenge(body.device_id, address=client(request), tailscale_user=tailscale_user(request))
 
     @app.post(prefix + "/auth/token")
     def token(body: Token, request: Request):
         limited(request)
-        return auth.token(body.device_id, body.nonce, body.signature, address=client(request))
+        return auth.token(body.device_id, body.nonce, body.signature, address=client(request), tailscale_user=tailscale_user(request))
 
     @app.get(prefix + "/me")
     def me(p=Depends(principal)):
@@ -284,7 +307,8 @@ def create_app(settings=None, dispatch=True):
             "username": p["username"],
             "role": p["role"],
             "devices": db.rows(
-                "SELECT id,created_at,revoked_at,last_access FROM devices WHERE user_id=?",
+                "SELECT id,created_at,revoked_at,last_access,last_address,last_tailscale_user "
+                "FROM devices WHERE user_id=?",
                 (p["user_id"],),
             ),
         }
@@ -530,7 +554,8 @@ def create_app(settings=None, dispatch=True):
     @app.get(prefix + "/admin/devices")
     def all_devices(p=Depends(admin)):
         return db.rows(
-            "SELECT id,user_id,created_at,revoked_at,last_access FROM devices ORDER BY created_at"
+            "SELECT id,user_id,created_at,revoked_at,last_access,last_address,last_tailscale_user "
+            "FROM devices ORDER BY created_at"
         )
 
     @app.post(prefix + "/admin/users", status_code=201)

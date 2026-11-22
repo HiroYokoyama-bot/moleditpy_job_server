@@ -19,6 +19,7 @@ function message(text) { $('#notice').textContent = text; $('#notice').title = t
 // Memory is stored in MB but shown and entered in GiB (1024 MB, the unit Windows calls GB).
 function gb(mb) { return typeof mb==='number' ? (mb/1024).toFixed(1) : '—'; }
 function date(value) { return value ? new Date(value*1000).toLocaleString() : '—'; }
+function origin(device) { return device.last_address ? device.last_address+(device.last_tailscale_user ? ' ('+device.last_tailscale_user+')' : '') : '—'; }
 function cell(row,text,className='') { const td = document.createElement('td'); td.textContent=String(text); td.className=className; row.append(td); return td; }
 // Lists are rebuilt only when what they show has changed: rebuilding identical rows on
 // every refresh made them flicker and dropped the pointer's hover and keyboard focus.
@@ -650,7 +651,7 @@ async function accounts(){
   }
   return rows;});
   renderList($('#devices-body'),[users,devices],()=>{const rows=[];
-  for(const device of devices){const row=document.createElement('tr');cell(row,device.id);cell(row,users.find(u=>u.id===device.user_id)?.username||device.user_id);cell(row,date(device.last_access));const action=cell(row,'');if(device.revoked_at)action.textContent='Revoked';else button(action,'Revoke',async()=>{if(confirm('Revoke this device and its current tokens?')){await api('POST','/admin/devices/'+device.id+'/revoke');await accounts();}});rows.push(row);}
+  for(const device of devices){const row=document.createElement('tr');cell(row,device.id);cell(row,users.find(u=>u.id===device.user_id)?.username||device.user_id);cell(row,date(device.last_access));cell(row,origin(device));const action=cell(row,'');if(device.revoked_at)action.textContent='Revoked';else button(action,'Revoke',async()=>{if(confirm('Revoke this device and its current tokens?')){await api('POST','/admin/devices/'+device.id+'/revoke');await accounts();}});rows.push(row);}
   return rows;});
 }
 function openReset(user){
@@ -679,13 +680,13 @@ async function accountPage(){
   $('#password-warning').hidden=location.protocol!=='http:'||['127.0.0.1','localhost','[::1]'].includes(location.hostname);
   $('#my-devices-body').replaceChildren();
   for(const device of me.devices){
-    const row=document.createElement('tr');cell(row,device.id);cell(row,date(device.created_at));cell(row,date(device.last_access));
+    const row=document.createElement('tr');cell(row,device.id);cell(row,date(device.created_at));cell(row,date(device.last_access));cell(row,origin(device));
     const action=cell(row,'');
     if(device.revoked_at)action.textContent='Revoked';
     else button(action,'Revoke',async()=>{if(confirm('Revoke this device and its current tokens? It must register again.')){await api('POST','/me/devices/'+device.id+'/revoke');await accountPage();}});
     $('#my-devices-body').append(row);
   }
-  if(!me.devices.length){const row=document.createElement('tr'),empty=cell(row,'No registered devices. Browser sign-in does not register one.','empty');empty.colSpan=4;$('#my-devices-body').append(row);}
+  if(!me.devices.length){const row=document.createElement('tr'),empty=cell(row,'No registered devices. Browser sign-in does not register one.','empty');empty.colSpan=5;$('#my-devices-body').append(row);}
 }
 $('#password-form').addEventListener('submit',event=>{
   event.preventDefault();const form=event.currentTarget,fields=form.elements,status=$('#password-status');

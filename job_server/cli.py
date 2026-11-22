@@ -101,6 +101,12 @@ def _short(identifier):
     return str(identifier or "")[:8]
 
 
+def _device_origin(device):
+    from .auth import device_origin
+
+    return device_origin(device).replace("—", "-")
+
+
 def _mb(value):
     if value is None:
         return ""
@@ -820,6 +826,7 @@ def cmd_devices(args, settings):
             ("User", lambda d: names.get(d["user_id"], _short(d["user_id"]))),
             ("Registered", lambda d: _time(d["created_at"])),
             ("Last access", lambda d: _time(d["last_access"])),
+            ("Last from", _device_origin),
             ("Revoked", lambda d: _time(d["revoked_at"]) or "-"),
         ])
         return 0

@@ -107,3 +107,94 @@ def test_two_users_fail_independently(client):
     assert [d["reason"] for _, d in events(client, "device_auth_failed")] == [
         "bad_signature", "unknown_challenge",
     ]
+
+
+# --- where a sign-in came from ------------------------------------------------
+
+
+def connected_from(client, address):
+    """Another client of the same app, connecting from *address*."""
+    from fastapi.testclient import TestClient
+
+    return TestClient(client.app, client=(address, 50000))
+
+
+def loopback(client):
+    """A client as Tailscale Serve, or any program on this PC, connects."""
+    return connected_from(client, "127.0.0.1")
+
+
+def device_row(client, device_id):
+    return client.app.state.db.one(
+        "SELECT last_address, last_tailscale_user FROM devices WHERE id=?", (device_id,)
+    )
+
+
+def test_a_password_sign_in_records_its_address(client):
+    client.app.state.auth.create_user("alice", "example-password-123")
+    response = client.post(
+        "/api/v1/auth/login", json={"username": "alice", "password": "example-password-123"}
+    )
+    assert response.status_code == 200
+    [(_, details)] = events(client, "login")
+    assert details == {"address": "testclient", "web": False}
+
+
+def test_a_device_sign_in_keeps_its_last_address_on_the_device(client, alice):
+    assert sign_in(client, alice).status_code == 200
+    assert device_row(client, alice["device_id"]) == {
+        "last_address": "testclient", "last_tailscale_user": None,
+    }
+
+
+def test_the_tailscale_login_is_recorded_for_a_loopback_connection(client, alice):
+    local = loopback(client)
+    local.headers["Tailscale-User-Login"] = "alice@example.com"
+    assert sign_in(local, alice).status_code == 200
+    assert device_row(client, alice["device_id"]) == {
+        "last_address": "127.0.0.1", "last_tailscale_user": "alice@example.com",
+    }
+    response = local.post(
+        "/api/v1/auth/login", json={"username": "alice", "password": "wrong-password"}
+    )
+    assert response.status_code == 401
+    [(_, details)] = events(client, "login_failed")
+    assert details["address"] == "127.0.0.1" and details["tailscale_user"] == "alice@example.com"
+
+
+def test_a_tailscale_header_from_a_direct_connection_is_ignored(client, alice):
+    # Only Serve removes a forged copy, and Serve connects over loopback.
+    lan = connected_from(client, "192.168.1.30")
+    lan.headers["Tailscale-User-Login"] = "admin@example.com"
+    assert sign_in(lan, alice).status_code == 200
+    assert device_row(client, alice["device_id"]) == {
+        "last_address": "192.168.1.30", "last_tailscale_user": None,
+    }
+
+
+def test_a_tailscale_login_that_is_not_plain_text_is_not_recorded(client, alice):
+    local = loopback(client)
+    for value in ["a\x1b[2Jb@example.com", "x" * 257, "two words"]:
+        local.headers["Tailscale-User-Login"] = value
+        assert sign_in(local, alice).status_code == 200
+        assert device_row(client, alice["device_id"])["last_tailscale_user"] is None
+
+
+def test_device_lists_show_where_a_device_last_signed_in(client, alice):
+    local = loopback(client)
+    local.headers["Tailscale-User-Login"] = "alice@example.com"
+    sign_in(local, alice)
+    me = client.get("/api/v1/me", headers=alice["headers"]).json()
+    [device] = me["devices"]
+    assert device["last_address"] == "127.0.0.1"
+    assert device["last_tailscale_user"] == "alice@example.com"
+
+
+def test_device_origin_text():
+    from job_server.auth import device_origin
+
+    assert device_origin({}) == "—"
+    assert device_origin({"last_address": "192.168.1.30"}) == "192.168.1.30"
+    assert device_origin(
+        {"last_address": "127.0.0.1", "last_tailscale_user": "alice@example.com"}
+    ) == "127.0.0.1 (alice@example.com)"

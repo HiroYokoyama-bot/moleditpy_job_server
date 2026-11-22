@@ -53,6 +53,7 @@ from PySide6.QtWidgets import (
 )
 
 from .. import PLUGIN_VERSION
+from ..auth import device_origin
 from ..client import ClientError, JobServerClient
 from .units import MB_PER_GB, GBSpinBox, FocusSpinBox, byte_size, gb
 from .network import LanAddressList
@@ -620,11 +621,12 @@ class Dashboard(QDialog):
         layout.addWidget(users_box, 1)
         devices_box = QGroupBox("Registered devices — right-click a device for actions")
         devices_layout = QVBoxLayout(devices_box)
-        self.devices = QTableWidget(0, 5)
+        self.devices = QTableWidget(0, 6)
         self.devices.setHorizontalHeaderLabels(
-            ["Device ID", "Username", "Status", "Last access (local)", "Registered (local)"]
+            ["Device ID", "Username", "Status", "Last access (local)", "Last from",
+             "Registered (local)"]
         )
-        self._table_layout(self.devices, (270, 130, 130, 200, 200))
+        self._table_layout(self.devices, (270, 130, 130, 200, 220, 200))
         devices_layout.addWidget(self.devices)
         device_buttons = QHBoxLayout()
         device_buttons.addWidget(self._action_button(self.revoke_device_action, "Revoke device..."))
@@ -1327,7 +1329,8 @@ class Dashboard(QDialog):
                     (d["id"], usernames.get(d["user_id"], d["user_id"]),
                      ("Revoked" if d["revoked_at"] is not None else "Active")
                      + (" · this window" if d["id"] == self.own_device else ""),
-                     self.timestamp(d["last_access"]), self.timestamp(d.get("created_at")))
+                     self.timestamp(d["last_access"]), device_origin(d),
+                     self.timestamp(d.get("created_at")))
                     for d in data["devices"]
                 ],
             )

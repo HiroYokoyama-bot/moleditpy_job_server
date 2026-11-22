@@ -159,7 +159,8 @@ async function accountsPolling() {
   devices=devices.map(d=>({...d,revoked_at:2}));
   await app.call('refresh')();
   assert.equal(app.get('#users-body').children[1].children[2].textContent,'Disabled');
-  assert.equal(app.get('#devices-body').children[0].children[3].textContent,'Revoked');
+  assert.equal(app.get('#devices-body').children[0].children[4].textContent,'Revoked');
+  assert.equal(app.get('#devices-body').children[0].children[3].textContent,'—');
 }
 async function accountsOrdering() {
   const entered=deferred(),late=deferred();let requests=0;
