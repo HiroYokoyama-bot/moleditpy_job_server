@@ -15,6 +15,28 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from .errors import reject
 
 
+def origin(address, tailscale_user=None):
+    """Where a sign-in came from, as recorded with it.
+
+    *tailscale_user* is the login Tailscale Serve reported for a request it
+    forwarded. It is a record, never a credential: the API passes it only for
+    loopback connections, and any program on this PC can connect there too.
+    """
+    details = {"address": address}
+    if tailscale_user:
+        details["tailscale_user"] = tailscale_user
+    return details
+
+
+def device_origin(device):
+    """A device row's last sign-in address for display, with its Tailscale login."""
+    address = device.get("last_address")
+    if not address:
+        return "—"
+    user = device.get("last_tailscale_user")
+    return f"{address} ({user})" if user else address
+
+
 #: Marks the tombstone of a deleted account; never a role anyone can sign in with.
 DELETED_ROLE = "deleted"
 
@@ -151,7 +173,7 @@ class Auth:
         )
         return {"token": token, "expires_at": expires, "scope": scope}
 
-    def login(self, username, password, *, web=False, address=None):
+    def login(self, username, password, *, web=False, address=None, tailscale_user=None):
         user = self.db.one("SELECT * FROM users WHERE username=?", (username,))
         verified = verify_password(password, user["password_hash"] if user else self.dummy_hash)
         if not verified or not user or not user["enabled"]:
@@ -166,8 +188,8 @@ class Auth:
                 user["id"] if user else None,
                 username=str(username)[:64],
                 reason=reason,
-                address=address,
                 web=web,
+                **origin(address, tailscale_user),
             )
             reject(401, "invalid_credentials", "Invalid credentials")
         with self.db.transaction() as c:
@@ -178,7 +200,7 @@ class Auth:
                 (user["id"], user["password_hash"]),
             ).fetchone():
                 reject(401, "invalid_credentials", "Invalid credentials")
-            self.db.event(c, "login", user["id"])
+            self.db.event(c, "login", user["id"], web=web, **origin(address, tailscale_user))
             c.execute("DELETE FROM sessions WHERE expires<?", (time.time(),))
             if web:
                 return self.issue(c, user["id"], scope="web", lifetime=min(self.settings.token_seconds, 900))
@@ -393,7 +415,7 @@ class Auth:
                 c.execute("DELETE FROM sessions WHERE digest=?", (principal["digest"],))
         return {"device_id": device_id}
 
-    def challenge(self, device_id, *, address=None):
+    def challenge(self, device_id, *, address=None, tailscale_user=None):
         device = self.db.one(
             "SELECT d.*,u.enabled FROM devices d JOIN users u ON u.id=d.user_id WHERE d.id=?",
             (device_id,),
@@ -409,7 +431,7 @@ class Auth:
                 device["user_id"] if device else None,
                 device_id=str(device_id)[:64],
                 reason=reason,
-                address=address,
+                **origin(address, tailscale_user),
             )
             reject(401, "invalid_device", "Device unavailable")
         nonce = secrets.token_urlsafe(32)
@@ -425,7 +447,7 @@ class Auth:
             "protocol_version": "1",
         }
 
-    def token(self, device_id, nonce, signature, *, address=None):
+    def token(self, device_id, nonce, signature, *, address=None, tailscale_user=None):
         with self.db.transaction() as c:
             challenge = c.execute(
                 "SELECT * FROM challenges WHERE nonce=? AND device_id=?", (nonce, device_id)
@@ -455,8 +477,12 @@ class Auth:
             valid = reason is None
             if valid:
                 # A success is not an event: a client signs in every few minutes, and the
-                # device's last_access already records it.
-                c.execute("UPDATE devices SET last_access=? WHERE id=?", (time.time(), device_id))
+                # device row already records when and from where it last did.
+                c.execute(
+                    "UPDATE devices SET last_access=?,last_address=?,last_tailscale_user=? "
+                    "WHERE id=?",
+                    (time.time(), address, tailscale_user, device_id),
+                )
                 result = self.issue(c, device["user_id"], device_id)
             else:
                 self.db.event(
@@ -465,7 +491,7 @@ class Auth:
                     device["user_id"] if device else None,
                     device_id=str(device_id)[:64],
                     reason=reason,
-                    address=address,
+                    **origin(address, tailscale_user),
                 )
         # Consume a failed signature too; raising inside the transaction would undo the DELETE.
         if not valid:

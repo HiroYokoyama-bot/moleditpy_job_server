@@ -67,6 +67,10 @@ class Database:
             ):
                 if name not in columns:
                     self.connection.execute(statement)
+            devices = {row[1] for row in self.connection.execute("PRAGMA table_info(devices)")}
+            for name in ("last_address", "last_tailscale_user"):
+                if name not in devices:
+                    self.connection.execute(f"ALTER TABLE devices ADD COLUMN {name} TEXT")
             self.connection.execute(
                 "CREATE INDEX IF NOT EXISTS job_queue ON jobs(state,force_run DESC,priority DESC,created_at,id)"
             )
