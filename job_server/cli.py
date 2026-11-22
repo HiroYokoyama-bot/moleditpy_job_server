@@ -12,7 +12,9 @@ from the command line.
 import argparse
 import getpass
 import json
+import contextlib
 import os
+import re
 import sys
 import time
 import uuid
@@ -22,6 +24,44 @@ from pathlib import Path
 
 class CliError(RuntimeError):
     """A failure reported as one line, with the exit status 1."""
+
+
+#: What a terminal would act on rather than show: C0 controls other than tab and
+#: newline (ESC starts escape sequences, CR overwrites a line), DEL, C1 controls,
+#: and the bidirectional overrides that make text read differently from its bytes.
+_UNSAFE = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f\u200e\u200f\u202a-\u202e\u2066-\u2069]")
+
+
+def safe_text(text):
+    """*text* with everything a terminal would interpret replaced by '?'.
+
+    Job names, usernames, job logs and the server's own logs hold text other
+    people chose, and printed as it is it could rewrite what an
+    administrator's terminal shows.
+    """
+    return _UNSAFE.sub("?", str(text))
+
+
+class _SafeStream:
+    def __init__(self, stream):
+        self._stream = stream
+
+    def write(self, text):
+        return self._stream.write(safe_text(text))
+
+    def __getattr__(self, name):
+        return getattr(self._stream, name)
+
+
+@contextlib.contextmanager
+def safe_output():
+    """Clean everything the command prints, whichever print it comes from."""
+    saved = sys.stdout, sys.stderr
+    sys.stdout, sys.stderr = _SafeStream(sys.stdout), _SafeStream(sys.stderr)
+    try:
+        yield
+    finally:
+        sys.stdout, sys.stderr = saved
 
 
 def _program():
@@ -158,9 +198,16 @@ def _client(settings, timeout=10):
 def _load_session(settings):
     from .credentials import load_key
 
+    from .files import open_regular
+
     path = session_path(settings)
+    if not path.exists():
+        return None
     try:
-        data = path.read_bytes()
+        with open_regular(path) as stream:  # never through a link
+            data = stream.read(65537)
+        if len(data) > 65536:
+            raise ValueError("session file is too large")
         if data.startswith(b"DPAPI\n"):
             from .credentials import dpapi
 
@@ -172,8 +219,6 @@ def _load_session(settings):
         if session["device_id"] != load_key(key_path(settings))["device_id"]:
             raise ValueError("session belongs to another device")
         return session
-    except FileNotFoundError:
-        return None
     except Exception:
         path.unlink(missing_ok=True)
         return None
@@ -374,11 +419,17 @@ def cmd_logs(args, settings):
         if not files:
             print("  (no logs yet)")
         return 0
+    from .files import open_regular
+
     path = directory / (args.name if args.name.endswith(".log") else args.name + ".log")
     if path.parent != directory or not path.is_file():
         names = ", ".join(p.stem for p in files) or "none yet"
         raise CliError(f"No log named {args.name!r} in {directory} (available: {names})")
-    with path.open("rb") as stream:
+    try:
+        stream = open_regular(path)  # a linked log is refused, as the server does
+    except Exception:
+        raise CliError(f"Cannot open {path} safely; linked logs are refused") from None
+    with stream:
         stream.seek(0, os.SEEK_END)
         size = stream.tell()
         # The last --lines lines, read from the end so a long log is not loaded whole.

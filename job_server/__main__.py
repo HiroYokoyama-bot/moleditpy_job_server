@@ -187,10 +187,11 @@ def main():
             return run_gui(args.config)
         settings = Settings.load(args.config)
         if hasattr(args, "handler"):
-            from .cli import remember_sessions
+            from .cli import remember_sessions, safe_output
 
             try:
-                return args.handler(args, settings)
+                with safe_output():
+                    return args.handler(args, settings)
             finally:
                 remember_sessions()
         if args.action == "serve":
@@ -221,7 +222,9 @@ def main():
         print("Interrupted.", file=sys.stderr)
         return 130
     except Exception as exc:
-        print(f"Error: {exc}", file=sys.stderr)
+        from .cli import safe_text
+
+        print(f"Error: {safe_text(exc)}", file=sys.stderr)
         return 1
     return 0
 

@@ -450,3 +450,76 @@ def test_a_refused_saved_token_signs_in_once_with_the_key(tmp_path, monkeypatch)
     assert cli._request(client, "GET", "/me") == {"ok": True}
     assert seen == ["saved-token", None] and not client.cached_session
     cli._CLIENTS.clear()
+
+
+# --- terminal safety -----------------------------------------------------------------
+
+
+HOSTILE = "evil\x1b]52;c;cGF5bG9hZA==\x07\x1b[2J\r‮gnp.exe\x9b31m"
+
+
+def _clean(text):
+    return not any(ch in text for ch in "\x1b\x07\r‮\x9b")
+
+
+def test_text_from_other_people_cannot_drive_the_terminal(fake, monkeypatch, capsys):
+    fake.answers[("GET", "/jobs?")] = [job_row(JOB, spec={
+        "name": HOSTILE, "command": HOSTILE, "resources": {"cpus_per_task": 1, "memory_mb": 1},
+    })]
+    fake.answers[("GET", "/jobs/")] = lambda path, body: job_row(JOB, spec={
+        "name": HOSTILE, "command": HOSTILE, "resources": {"cpus_per_task": 1, "memory_mb": 1},
+    })
+    fake.answers[("GET", f"/jobs/{JOB}/log")] = {"text": HOSTILE + "\n", "next_offset": 9, "size": 9}
+    for argv in (["jobs"], ["jobs", "show", JOB], ["jobs", "log", JOB]):
+        assert run(monkeypatch, *argv) == 0
+        out = capsys.readouterr().out
+        assert "evil" in out and _clean(out), argv
+    assert run(monkeypatch, "jobs", "--json") == 0
+    out = capsys.readouterr().out
+    assert _clean(out) and json.loads(out)[0]["spec"]["name"] == HOSTILE
+
+
+def test_an_error_message_from_the_server_is_cleaned(fake, monkeypatch, capsys):
+    from job_server.client import ClientError
+
+    def refused(method, path, body=None):
+        raise ClientError(422, {"message": HOSTILE})
+
+    monkeypatch.setattr(fake, "request", refused)
+    assert run(monkeypatch, "queue") == 1
+    err = capsys.readouterr().err
+    assert "evil" in err and _clean(err)
+
+
+def test_a_server_log_is_cleaned_and_a_linked_one_refused(monkeypatch, tmp_path, capsys):
+    settings = Settings(data_dir=str(tmp_path))
+    monkeypatch.setattr(Settings, "load", classmethod(lambda cls, path=None: settings))
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    (logs / "daemon.log").write_text(f"login failed for {HOSTILE}\n", encoding="utf-8")
+    assert run(monkeypatch, "logs", "daemon") == 0
+    out = capsys.readouterr().out
+    assert "login failed for evil" in out and _clean(out)
+    outside = tmp_path / "elsewhere.txt"
+    outside.write_text("private\n")
+    try:
+        (logs / "linked.log").symlink_to(outside)
+    except OSError:
+        pytest.skip("Creating a symbolic link needs a privilege this account lacks")
+    assert run(monkeypatch, "logs", "linked") == 1
+    captured = capsys.readouterr()
+    assert "linked logs are refused" in captured.err and "private" not in captured.out
+
+
+def test_a_linked_session_file_is_not_read(tmp_path):
+    settings = _signed_in(tmp_path)
+    _saved(settings)
+    real = cli.session_path(settings)
+    moved = tmp_path / "moved-session"
+    real.rename(moved)
+    try:
+        real.symlink_to(moved)
+    except OSError:
+        pytest.skip("Creating a symbolic link needs a privilege this account lacks")
+    assert cli._client(settings).token is None
+    cli._CLIENTS.clear()
