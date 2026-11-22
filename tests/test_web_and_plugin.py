@@ -169,7 +169,7 @@ def test_gui_start_adopts_saved_port(tmp_path, monkeypatch):
     commands = []
     monkeypatch.setattr("job_server.lifecycle.wait_until_ready", lambda *args: None)
     monkeypatch.setattr(
-        "job_server.ui.dashboard.subprocess.Popen", lambda args, **kwargs: commands.append(args)
+        "job_server.lifecycle.subprocess.Popen", lambda args, **kwargs: commands.append(args)
     )
     dialog.start_daemon()
     deadline = time.monotonic() + 30
@@ -208,7 +208,7 @@ def test_gui_refuses_listener_that_does_not_hold_daemon_lock(tmp_path, monkeypat
 
     monkeypatch.setattr(dialog.client, "request", answering)
     monkeypatch.setattr(
-        "job_server.ui.dashboard.subprocess.Popen", lambda *args, **kwargs: None
+        "job_server.lifecycle.subprocess.Popen", lambda *args, **kwargs: None
     )
 
     def run(call):
