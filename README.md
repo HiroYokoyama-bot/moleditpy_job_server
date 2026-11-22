@@ -54,7 +54,8 @@ Python, and an administrator runs the server from MoleditPy or the command line.
 ![Job Server first-run setup](docs/gui-setup.png)
 
 Closing the window does not stop the daemon. **Server → Stop** stops it and preserves
-running jobs. If the window cannot verify a running daemon (started by an older version,
+running jobs; so does `moleditpy-job-server stop` from a terminal
+([command line](#administering-from-the-command-line)). If the window cannot verify a running daemon (started by an older version,
 or its port changed while it ran), **Start**, **Stop** and **Restart** offer to stop its
 process instead. A portable MoleditPy build needs a Python selected in **Settings → Daemon Python runtime**.
 

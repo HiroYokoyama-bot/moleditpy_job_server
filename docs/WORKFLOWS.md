@@ -75,7 +75,9 @@ the existing release version. Releases published outside that token also trigger
 
 Install the headless daemon with `python -m pip install moleditpy-job-server`.
 Add `[gui]` only for the optional MoleditPy administration dialogs. Python 3.11+
-is required; the CLI entry point is `moleditpy-job-server`.
+is required; the CLI entry point is `moleditpy-job-server`. From 1.6.0 it also starts,
+stops and administers the server (`start`, `stop`, `drain`, `login`, `queue`, `jobs`,
+`users`, ...); see the README's command tables.
 
 CI jobs have read-only repository tokens and no publication secrets. Only the
 publication job gets `contents: write`; the registry token is passed only to the
