@@ -52,6 +52,17 @@ Desktop clients sign in with a device key instead of a saved password. A window 
 device was revoked offers to register again, and replaces its key only after the server
 accepts the new device.
 
+The command line on the server PC is a device of its own. `moleditpy-job-server login`
+asks for the password, registers a new key as `identity/cli-device.key` in the data folder,
+and later commands sign in with that key. It stays signed in until `logout`, which revokes
+the device on the server and deletes the key; `logout --local-only` deletes it without
+asking the server, leaving the device for an administrator to revoke. The short-lived token
+a command was issued is kept as `identity/cli-session.json` so the next command need not
+sign in again: every client on the server PC shares the loopback address's sign-in limit.
+Both files are readable only by their owner (DPAPI-encrypted on Windows), are never read
+through a link, and are only ever sent after the daemon on the port is verified to be this
+data folder's own. A password is never accepted on the command line.
+
 ## Forgotten password
 
 Run this on the server PC, which works while the server is running:

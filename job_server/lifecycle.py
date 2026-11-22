@@ -1,8 +1,11 @@
 """Bounded lifecycle waits for the local administration client."""
 
+import os
+import subprocess
 import time
 from datetime import datetime
 from http.client import HTTPException
+from pathlib import Path
 
 import psutil
 
@@ -50,6 +53,60 @@ def wait_until_ready(client, root, process, timeout=20):
         if time.monotonic() >= deadline:
             raise TimeoutError("Server did not become ready. Open File > Open Logs > startup.log.")
         time.sleep(0.15)
+
+
+def local_url(settings):
+    """The loopback address local administration talks to."""
+    return f"http://127.0.0.1:{settings.port}"
+
+
+def start_daemon(settings, config, before_launch=None, probe=None):
+    """Start this configuration's daemon detached, or reuse the one running.
+
+    Returns True when a new daemon was started, False when this directory's
+    own daemon was already running. A listener on the port that is not this
+    Job Server raises, and nothing is started. The daemon outlives the caller:
+    it gets a session of its own, and its output goes to logs/startup.log.
+    *before_launch* runs only when a new daemon is about to be started; *probe*
+    is the client that asks the port for /health first (default: a new one).
+    """
+    from .client import JobServerClient
+    from .runtime import python_executable
+
+    url = local_url(settings)
+    try:
+        health = (probe or JobServerClient(url, timeout=3)).request(
+            "GET", "/health", authenticated=False
+        )
+    except Exception:
+        health = None
+    if health is not None:
+        verify_local_daemon(settings.root, settings.port)
+        if health.get("status", "ok") != "ok":
+            wait_until_ready(JobServerClient(url, timeout=1), settings.root, None)
+        return False
+    if before_launch is not None:
+        before_launch()
+    log_dir = settings.root / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    environment = os.environ.copy()
+    environment["PYTHONPATH"] = (
+        str(Path(__file__).resolve().parents[1]) + os.pathsep + environment.get("PYTHONPATH", "")
+    )
+    with (log_dir / "startup.log").open("ab") as log:
+        log.write(startup_banner().encode("utf-8"))
+        log.flush()
+        process = subprocess.Popen(
+            [python_executable(settings), "-m", "job_server", "serve", "--config", str(config)],
+            stdin=subprocess.DEVNULL,
+            stdout=log,
+            stderr=subprocess.STDOUT,
+            env=environment,
+            start_new_session=os.name != "nt",
+            creationflags=0x08000000 | 0x00000008 if os.name == "nt" else 0,
+        )
+    wait_until_ready(JobServerClient(url, timeout=1), settings.root, process)
+    return True
 
 
 def _wait_until_idle(root, timeout):

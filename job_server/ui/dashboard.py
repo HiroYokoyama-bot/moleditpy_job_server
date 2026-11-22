@@ -5,7 +5,6 @@ import json
 import logging
 import os
 import sqlite3
-import subprocess
 import threading
 import time
 import uuid
@@ -1775,57 +1774,15 @@ class Dashboard(QDialog):
             self.client = JobServerClient(
                 url, settings.root / "identity" / "admin-device.key", timeout=3,
             )
-        try:
-            health = self.client.request("GET", "/health", authenticated=False)
-            running = True
-        except Exception:
-            running = False
-        if running:
-            self.require_own_daemon()
-            if health.get("status", "ok") != "ok":
-                from ..lifecycle import wait_until_ready
-                wait_until_ready(JobServerClient(self.client.url, timeout=1), settings.root, None)
+        from ..lifecycle import start_daemon
+
+        # Saved only for a new daemon: a running one keeps what it read at start.
+        if not start_daemon(
+            settings, self.config, before_launch=lambda: settings.save(self.config), probe=self.client,
+        ):
             return "Daemon is already running; reusing it."
-        settings.save(self.config)
-        log_dir = settings.root / "logs"
-        log_dir.mkdir(parents=True, exist_ok=True)
-        environment = os.environ.copy()
-        environment["PYTHONPATH"] = (
-            str(Path(__file__).resolve().parents[2])
-            + os.pathsep
-            + environment.get("PYTHONPATH", "")
-        )
-        with (log_dir / "startup.log").open("ab") as log:
-            from ..lifecycle import startup_banner
-            from ..runtime import python_executable
-
-            log.write(startup_banner().encode("utf-8"))
-            log.flush()
-
-            process = subprocess.Popen(
-                [
-                    python_executable(settings),
-                    "-m",
-                    "job_server",
-                    "serve",
-                    "--config",
-                    str(self.config),
-                ],
-                stdin=subprocess.DEVNULL,
-                stdout=log,
-                stderr=subprocess.STDOUT,
-                env=environment,
-                start_new_session=os.name != "nt",
-                creationflags=0x08000000 | 0x00000008 if os.name == "nt" else 0,
-            )
-        self.client = JobServerClient(
-            f"http://127.0.0.1:{settings.port}",
-            settings.root / "identity" / "admin-device.key", timeout=3,
-        )
+        self.client = JobServerClient(url, settings.root / "identity" / "admin-device.key", timeout=3)
         self._unapplied = False  # the new process read the file just saved
-        from ..lifecycle import wait_until_ready
-
-        wait_until_ready(JobServerClient(self.client.url, timeout=1), settings.root, process)
         return "Server is running. Active jobs are preserved."
 
     def _server_task(self, name, call, title, done):

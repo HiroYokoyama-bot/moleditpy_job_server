@@ -63,7 +63,7 @@ certificates and forwards connections to the local Job Server.
    hostname, not the server's LAN IP, and do not append `:8766` to that HTTPS URL.
 5. To use the browser UI, paste that same HTTPS URL in Job Server's
    **Settings → Other web URLs**, save the configuration, then
-   choose **Server → Restart**. The JSON setting is `public_urls` (one origin per list entry). This enables browser access at that address. Other website addresses remain rejected.
+   choose **Server → Restart** (or run `moleditpy-job-server restart`). The JSON setting is `public_urls` (one origin per list entry). This enables browser access at that address. Other website addresses remain rejected.
 
 The daemon stays on loopback and ignores forwarded headers. HTTP on
 `127.0.0.1:8766` is the local connection from Tailscale Serve to Job Server; remote

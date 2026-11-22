@@ -36,6 +36,7 @@ Job Server 0.5.0 は `127.0.0.1` でしか待ち受けません。
 3. **Reachable from other PCs at** で、この PC の LAN IP にチェックを入れます。複数のネットワークに
    つながっている場合は、複数選べます。できる URL は **Connect using** に表示されます。
 4. 保存すると再起動するか聞かれるので **Yes** を選びます。サーバーが止まっている場合は **Server > Start** です。
+   ウィンドウを使わない場合は、ターミナルで `moleditpy-job-server restart`（止まっていれば `start`）を実行しても同じです。
 5. **Create / show CA certificate...** を開き、SHA-256 指紋を表示しておきます。
 6. LAN IP で待ち受けていることを確認します。手順 6〜9 は Windows 用です。Linux と Mac は
    [サーバーが Linux または Mac の場合](#サーバーが-linux-または-mac-の場合) を参照してください。
