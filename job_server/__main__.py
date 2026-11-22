@@ -4,24 +4,8 @@ import json
 import sys
 from pathlib import Path
 
+from .cli import _command, _program, add_commands
 from .settings import Settings, pc_resources
-
-
-def _program():
-    """How this command was started, so a hint names a command that exists.
-
-    Started by ``moleditpy --run-plugin`` the server is a plugin folder, and
-    the ``moleditpy-job-server`` launcher pip creates need not be installed.
-    """
-    if "moleditpy.plugins.plugin_runner" in sys.modules:
-        return f"moleditpy -r {__package__ or 'job_server'}"
-    return "moleditpy-job-server"
-
-
-def _command(action, args):
-    """The command line for a next step, carrying a non-default --config along."""
-    config = getattr(args, "config", None)
-    return f"{_program()} {action}" + (f' --config "{config}"' if config else "")
 
 
 def _ask_admin(username=None):
@@ -141,8 +125,14 @@ def main():
     )
     parser.add_argument("--config", type=Path)
     sub = parser.add_subparsers(dest="action", required=True)
-    for name in ("serve", "status", "init", "gui", "create-admin", "reset-password"):
-        child = sub.add_parser(name)
+    for name, text in (
+        ("serve", "run the server in the foreground"),
+        ("init", "write a first configuration"),
+        ("gui", "open the desktop window"),
+        ("create-admin", "create the first administrator on this PC"),
+        ("reset-password", "set a user's password on this PC, without signing in"),
+    ):
+        child = sub.add_parser(name, help=text, description=text)
         child.add_argument("--config", type=Path, default=argparse.SUPPRESS)
         if name == "init":
             # First-run choices belong here, before the first start, so a new
@@ -184,6 +174,7 @@ def main():
                 "--revoke-devices", action="store_true",
                 help="also revoke every device registered to this account",
             )
+    add_commands(sub)
     args = parser.parse_args()
     try:
         if args.action == "init":
@@ -195,19 +186,12 @@ def main():
 
             return run_gui(args.config)
         settings = Settings.load(args.config)
+        if hasattr(args, "handler"):
+            return args.handler(args, settings)
         if args.action == "serve":
             from .server_app import serve
 
             serve(settings)
-        elif args.action == "status":
-            from .client import JobServerClient
-            from .lifecycle import directory_is_idle
-
-            if not settings.root.exists() or directory_is_idle(settings.root):
-                raise RuntimeError(f"Server is OFF. Start it with: {_command('serve', args)}")
-            client = JobServerClient(f"http://127.0.0.1:{settings.port}", timeout=3)
-            health = client.request("GET", "/health", authenticated=False)
-            print(json.dumps(health))
         elif args.action == "create-admin":
             print(json.dumps(_create_admin(settings)))
         elif args.action == "reset-password":
@@ -228,6 +212,9 @@ def main():
                 )))
             finally:
                 db.close()
+    except KeyboardInterrupt:
+        print("Interrupted.", file=sys.stderr)
+        return 130
     except Exception as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
