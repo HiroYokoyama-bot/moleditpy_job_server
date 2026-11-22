@@ -123,8 +123,11 @@ server is reachable from this PC only.
 |---|---|
 | `init` | Write a configuration, with this PC's size as the budget |
 | `create-admin` | Create the first administrator, if `init --admin` did not |
-| `serve` | Run the server |
-| `status` | Ask a running server for its health; reports when it is OFF |
+| `serve` | Run the server in the foreground |
+| `start` / `stop` / `restart` | Run the server in the background, stop it, or both; running jobs continue |
+| `status` | Whether the server runs, its addresses, and (signed in) its queue; `--json` for scripts |
+| `logs [daemon\|startup\|gui]` | List the server's logs, or print one (`-n LINES`, `-f` to follow) |
+| `drain` | Pause the queue, wait until no job runs, then stop: for updating the server safely |
 | `gui` | Open the desktop window without MoleditPy (needs the `gui` extra) |
 | `reset-password <username>` | Recover a forgotten password on the server PC |
 
@@ -140,6 +143,42 @@ server is reachable from this PC only.
 | `--data-dir PATH` | Data folder (default `~/.moleditpy/job_server/`) |
 | `--description TEXT` | A note about this PC, shown with the server status |
 | `--admin USERNAME` | Also create the first administrator |
+
+### Administering from the command line
+
+Everything the window's Queue and Account menus do also works from a terminal on the
+server PC. Sign in once; the command line registers as a device of its own and stays
+signed in until `logout`:
+
+```sh
+moleditpy-job-server login admin          # asks for the password
+moleditpy-job-server queue                # running and waiting jobs
+moleditpy-job-server jobs --all           # every user's jobs
+moleditpy-job-server jobs cancel 3f2a     # a job ID, or its first characters
+moleditpy-job-server drain && moleditpy-job-server start
+```
+
+| Command | Purpose |
+|---|---|
+| `login [USERNAME]` / `logout` / `whoami` | Register this command line and sign in; revoke it and sign out; show the account |
+| `queue [show\|pause\|resume]` | Show the queue, or keep waiting jobs from starting and let them start again |
+| `jobs [list] [--all] [--state S]` | Your jobs, or everyone's (administrator) |
+| `jobs show\|log\|cancel\|hold\|release JOB` | One job's details or log (`-f` to follow), cancel it, hold or release it |
+| `jobs priority\|resources\|owner\|force-run\|mark-lost JOB ...` | The administrator's job controls, as in the window |
+| `jobs move-finished` | Queue finished jobs for the finished-jobs folder |
+| `users [list\|add\|disable\|enable\|delete\|role\|password]` | Manage accounts (administrator); passwords are asked for |
+| `devices [list\|revoke ID]` | Registered devices, and revoking one (administrator) |
+| `events [-n N]` | The newest entries of the activity log (administrator) |
+
+Actions that cannot be undone ask first; `-y` answers for scripts. List commands take
+`--json`. Text other users chose — job names, logs — is printed with terminal control
+characters replaced. `start`, `stop`, `restart`, `status` and `logs` need no sign-in, with
+the same authority over this PC's server as `reset-password`; signed in, `stop` shuts down
+through the API and the activity log records who did. On Windows, stopping without
+signing in needs `--force`, because ending the process skips the clean shutdown.
+`drain` leaves the queue paused; resume it with `queue resume` after the next `start`.
+A server run by systemd ([deploy/job-server.service](deploy/job-server.service)) is
+better started and stopped with `systemctl --user`.
 
 Every command accepts `--config /path/to/settings.json`. Data lives in
 `~/.moleditpy/job_server/`. Install `moleditpy-job-server[gui]` for the desktop window.
