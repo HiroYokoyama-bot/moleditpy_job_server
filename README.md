@@ -88,6 +88,13 @@ users, devices and the activity log. See
 resumable, hash-verified uploads and downloads. See
 [the Python client](docs/PYTHON_CLIENT.md).
 
+## AI agents
+
+Agents reach this server through Job Manager's script command line. A
+ready-made operating procedure for agents is kept as a skill in the
+Job Manager repository:
+[moleditpy-job-manager](https://github.com/HiroYokoyama/moleditpy_job_manager/blob/main/skills/moleditpy-job-manager/SKILL.md).
+
 ## Limits
 
 CPU and memory budgets are **advisory**: they decide when jobs start, not
