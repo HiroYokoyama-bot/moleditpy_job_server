@@ -33,7 +33,7 @@ compatibility.
 
 The copyright holder additionally grants LGPL-3.0-or-later for the first-party
 Job Manager sources (including its embedded first-party HTTP client) taken from commit
-`110e1e27797f27cd2896e0e9ec388dd940992713`, as redistributed in this migration's
+`a66d8d593f6b9ff202f01cd6029ea4cd6a8246fb`, as redistributed in this migration's
 `upstream/job_manager`, patched integration copy and `job_server/_execution`.
 The immutable submodule's original GPL license document and source bytes are
 preserved for provenance; this explicit owner permission supplies the additional
