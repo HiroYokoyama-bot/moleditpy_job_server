@@ -89,7 +89,7 @@ def test_the_dashboard_draws_the_server_history_and_switches_span(tmp_path, qt, 
         board.close()
 
 
-def test_cpu_trend_marks_where_every_core_is_busy(qtbot=None):
+def test_cpu_trend_marks_where_every_core_is_busy(qt):
     from job_server.ui.meters import Trend
 
     trend = Trend("%", 100, clock=lambda: 3.0)
