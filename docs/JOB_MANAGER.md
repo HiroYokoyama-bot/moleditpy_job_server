@@ -11,7 +11,7 @@ and click **Sign in / register device**. The server's execution OS selects the n
 scheduler. Submit, monitor, tail, cancel, and download then use the normal Job Manager UI.
 
 For development and regression checks, build a reproducible companion from this
-server's pinned older Job Manager source:
+server's pinned Job Manager source:
 
 ```sh
 python scripts/build_job_manager.py
@@ -20,9 +20,10 @@ python scripts/build_job_manager.py
 The test-only companion is `dist/job_manager_job_server.zip`. CI builds and validates
 it, but it is excluded from release downloads, distribution artifacts and `SHA256SUMS`.
 Install the normal Job Manager 2.6.0+ release for everyday use; installing this test
-companion would replace it with the pinned older version plus the integration overlay.
+companion would replace it with the pinned version.
 
-The companion is generated from the audited upstream commit and an explicit integration
-overlay. It does not change your sibling Job Manager repository or its upstream branch.
-`integration/job_manager.patch` records changes for upstream review;
-`integration/server_backend.py` is the additional bridge module.
+The companion is generated from the audited upstream commit; current upstream carries
+the server integration natively, so no overlay is applied and
+`integration/job_manager.patch` is empty. It does not change your sibling Job Manager
+repository or its upstream branch. `integration/server_backend.py` is the bridge module
+used only when building from an upstream revision without the native integration.
