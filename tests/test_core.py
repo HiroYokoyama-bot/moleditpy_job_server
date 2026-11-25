@@ -14,6 +14,18 @@ def test_placeholder_quoting_context_is_rejected(command):
         render_command(command, {"input": "input'; touch injected"})
 
 
+@pytest.mark.parametrize("command", ["run {basename}", "run [input]", "run [stem]"])
+def test_retired_placeholder_spellings_are_refused(tmp_path, command):
+    spec = {
+        "name": "job",
+        "command": command,
+        "files": [{"path": "input.gjf"}],
+        "resources": {"cpus_per_task": 1, "memory_mb": 512, "walltime_seconds": 30},
+    }
+    with pytest.raises(ValueError, match="no longer supported"):
+        build_wrapper(spec, tmp_path.as_posix())
+
+
 def test_placeholder_escaping_and_literal_language_braces():
     result = render_command("awk '{print $1}' {input}", {"input": "input's data"})
     assert "awk '{print $1}'" in result

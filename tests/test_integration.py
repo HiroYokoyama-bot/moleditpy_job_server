@@ -8,8 +8,8 @@ from scripts.build_job_manager import build
 
 def test_companion_job_manager_routes_use_backend_not_transport(tmp_path):
     target = tmp_path / "job_manager"
-    patch = build(target)
-    assert "server_allow_lan_http" in patch
+    build(target)
+    assert "server_allow_lan_http" in (target / "models.py").read_text("utf-8")
     assert "Job Server (HTTPS)" in (target / "host_profile_form.py").read_text("utf-8")
     assert (target / "job_server_client/connection.py").read_text("utf-8") == (
         Path(__file__).resolve().parents[1] / "job_server/connection.py"

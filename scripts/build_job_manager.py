@@ -321,9 +321,7 @@ def build(destination):
         models = (source / "models.py").read_text("utf-8")
         if 'BACKEND_JOB_SERVER = "job_server"' not in models:
             raise RuntimeError("Upstream server integration is incomplete")
-        from integration.lan_http import patch_lan_http
 
-        patch_lan_http(destination, replace)
         diffs = []
         for path in sorted(destination.rglob("*")):
             if not path.is_file() or path.suffix not in {".py", ".json"}:

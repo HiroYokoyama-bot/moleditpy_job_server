@@ -6,7 +6,7 @@ import shlex
 import sys
 from pathlib import Path
 
-UPSTREAM_REVISION = "110e1e27797f27cd2896e0e9ec388dd940992713"
+UPSTREAM_REVISION = "a66d8d593f6b9ff202f01cd6029ea4cd6a8246fb"
 
 
 def execution_core():
@@ -64,8 +64,15 @@ def build_wrapper(spec, workdir, windows=False, setup_commands=()):
     preset_type, shell, powershell = execution_core()
     files = spec["files"]
     input_name = files[0]["path"] if files else ""
-    from ._execution.schedulers.base import placeholder_values, references_input
+    from ._execution.schedulers.base import (
+        placeholder_values,
+        references_input,
+        retired_tags_message,
+    )
 
+    retired = retired_tags_message(spec["command"])
+    if retired:
+        raise ValueError(retired)
     if not input_name and references_input(spec["command"]):
         raise ValueError("Input placeholders require an input file")
     resources = spec["resources"]
