@@ -129,11 +129,18 @@ def main():
         ("serve", "run the server in the foreground"),
         ("init", "write a first configuration"),
         ("gui", "open the desktop window"),
+        ("install-launcher", "add the window to the Linux application list and desktop"),
         ("create-admin", "create the first administrator on this PC"),
         ("reset-password", "set a user's password on this PC, without signing in"),
     ):
         child = sub.add_parser(name, help=text, description=text)
         child.add_argument("--config", type=Path, default=argparse.SUPPRESS)
+        if name == "install-launcher":
+            child.add_argument(
+                "--no-desktop-icon",
+                action="store_true",
+                help="only add the application-list entry, not the desktop icon",
+            )
         if name == "init":
             # First-run choices belong here, before the first start, so a new
             # server does not need a start/stop/restart cycle per setting.
@@ -185,6 +192,16 @@ def main():
             from .ui.standalone import run_gui
 
             return run_gui(args.config)
+        if args.action == "install-launcher":
+            if not sys.platform.startswith("linux"):
+                print("install-launcher is for Linux desktops; Windows needs no launcher.")
+                return 1
+            from .ui.standalone import install_launcher
+
+            for entry in install_launcher(args.config, desktop=False if args.no_desktop_icon else None):
+                print(f"Wrote {entry}")
+            print("Open MoleditPy Job Server from the application list.")
+            return 0
         settings = Settings.load(args.config)
         if hasattr(args, "handler"):
             from .cli import remember_sessions, safe_output

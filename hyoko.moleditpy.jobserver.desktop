@@ -1,9 +1,0 @@
-[Desktop Entry]
-Name=MoleditPy Job Server
-Type=Application
-Comment=Manage the MoleditPy Job Server
-Terminal=false
-Icon=hyoko.moleditpy.jobserver
-Exec=moleditpy-job-server gui
-StartupWMClass=hyoko.moleditpy.jobserver
-Categories=Science;
