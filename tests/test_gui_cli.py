@@ -100,7 +100,7 @@ def test_standalone_dashboard_has_its_own_application_icon(tmp_path, monkeypatch
         assert not app.windowIcon().isNull()
         assert app.windowIcon().cacheKey() == dashboard.windowIcon().cacheKey()
         if platform == "win32":
-            assert startup == ["MoleditPy.JobServer", "QApplication"]
+            assert startup == [standalone.DESKTOP_APP_ID, "QApplication"]
         else:
             app_id = standalone.DESKTOP_APP_ID
             assert app.applicationName() == app_id

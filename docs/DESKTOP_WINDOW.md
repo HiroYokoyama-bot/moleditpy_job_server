@@ -7,7 +7,7 @@ after installing `moleditpy-job-server[gui]`, run:
 
 ```sh
 data_dir="${XDG_DATA_HOME:-$HOME/.local/share}"
-app_id=io.github.HiroYokoyama.MoleditPyJobServer
+app_id=hyoko.moleditpy.jobserver
 install -Dm644 "$app_id.desktop" "$data_dir/applications/$app_id.desktop"
 install -Dm644 job_server/web/icon.png "$data_dir/icons/hicolor/128x128/apps/$app_id.png"
 ```

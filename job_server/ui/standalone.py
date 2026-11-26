@@ -16,7 +16,7 @@ import sys
 from pathlib import Path
 
 
-DESKTOP_APP_ID = "io.github.HiroYokoyama.MoleditPyJobServer"
+DESKTOP_APP_ID = "hyoko.moleditpy.jobserver"
 
 
 def instance_name(config=None):
@@ -68,7 +68,7 @@ def run_gui(config=None):
         if sys.platform == "win32":
             from ctypes import windll
 
-            windll.shell32.SetCurrentProcessExplicitAppUserModelID("MoleditPy.JobServer")
+            windll.shell32.SetCurrentProcessExplicitAppUserModelID(DESKTOP_APP_ID)
         app = QApplication(sys.argv)
         if sys.platform == "linux":
             app.setApplicationName(DESKTOP_APP_ID)
