@@ -1,11 +1,21 @@
 # Desktop window
 
-When launched on its own with `python -m job_server gui`, the dashboard shows a
-Job Server icon in the Windows notification area or Ubuntu's top bar. On Ubuntu
-with GNOME, the AppIndicator extension must be enabled before launching the
-dashboard. Use **Show dashboard** in the icon's menu to restore a minimized
-window. Closing the dashboard removes the icon and leaves the server running
-if it was already started.
+The standalone dashboard uses the Job Server icon in the Windows taskbar.
+On Ubuntu, install the desktop entry and icon so GNOME can associate the
+dashboard window with its application in the Dock. From the source directory,
+after installing `moleditpy-job-server[gui]`, run:
+
+```sh
+data_dir="${XDG_DATA_HOME:-$HOME/.local/share}"
+app_id=io.github.HiroYokoyama.MoleditPyJobServer
+install -Dm644 "$app_id.desktop" "$data_dir/applications/$app_id.desktop"
+install -Dm644 job_server/web/icon.png "$data_dir/icons/hicolor/128x128/apps/$app_id.png"
+```
+
+Open **MoleditPy Job Server** from the application list. If you installed in a
+virtual environment, edit the installed desktop entry's `Exec` line to use the
+absolute path to that environment's `moleditpy-job-server` command, followed by
+`gui`.
 
 Right-click a job, user or device for its actions. The same actions are in the menus.
 
