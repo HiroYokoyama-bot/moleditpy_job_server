@@ -1,5 +1,22 @@
 # Desktop window
 
+The standalone dashboard uses the Job Server icon in the Windows taskbar.
+On Ubuntu, install the desktop entry and icon so GNOME can associate the
+dashboard window with its application in the Dock. From the source directory,
+after installing `moleditpy-job-server[gui]`, run:
+
+```sh
+data_dir="${XDG_DATA_HOME:-$HOME/.local/share}"
+app_id=hyoko.moleditpy.jobserver
+install -Dm644 "$app_id.desktop" "$data_dir/applications/$app_id.desktop"
+install -Dm644 job_server/web/icon.png "$data_dir/icons/hicolor/128x128/apps/$app_id.png"
+```
+
+Open **MoleditPy Job Server** from the application list. If you installed in a
+virtual environment, edit the installed desktop entry's `Exec` line to use the
+absolute path to that environment's `moleditpy-job-server` command, followed by
+`gui`.
+
 Right-click a job, user or device for its actions. The same actions are in the menus.
 
 ![Users and devices tab with its right-click menu](gui-users.png)

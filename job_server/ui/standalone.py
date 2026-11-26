@@ -16,6 +16,9 @@ import sys
 from pathlib import Path
 
 
+DESKTOP_APP_ID = "hyoko.moleditpy.jobserver"
+
+
 def instance_name(config=None):
     """The single-instance name for one configuration file.
 
@@ -49,6 +52,7 @@ def ask_running_to_show(name):
 def run_gui(config=None):
     """Open the dashboard as its own program. Returns the exit code."""
     try:
+        from PySide6.QtCore import Qt
         from PySide6.QtNetwork import QLocalServer
         from PySide6.QtWidgets import QApplication
     except ImportError:
@@ -58,7 +62,17 @@ def run_gui(config=None):
             file=sys.stderr,
         )
         return 1
-    app = QApplication.instance() or QApplication(sys.argv)
+    app = QApplication.instance()
+    owns_app = app is None
+    if owns_app:
+        if sys.platform == "win32":
+            from ctypes import windll
+
+            windll.shell32.SetCurrentProcessExplicitAppUserModelID(DESKTOP_APP_ID)
+        app = QApplication(sys.argv)
+        if sys.platform == "linux":
+            app.setApplicationName(DESKTOP_APP_ID)
+            app.setDesktopFileName(DESKTOP_APP_ID)
     name = instance_name(config)
     if ask_running_to_show(name):
         return 0
@@ -81,6 +95,13 @@ def run_gui(config=None):
     except ImportError as exc:
         dependency_dialog(None, [exc.name or str(exc)])
         return 1
+
+    if sys.platform in ("win32", "linux"):
+        # Give the standalone dashboard a regular application-window entry.
+        flags = dialog.windowFlags() & ~Qt.WindowType.WindowType_Mask
+        dialog.setWindowFlags(flags | Qt.WindowType.Window)
+        if owns_app:
+            app.setWindowIcon(dialog.windowIcon())
 
     if server is not None:
         pending = []
