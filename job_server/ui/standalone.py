@@ -49,8 +49,9 @@ def ask_running_to_show(name):
 def run_gui(config=None):
     """Open the dashboard as its own program. Returns the exit code."""
     try:
+        from PySide6.QtCore import Qt
         from PySide6.QtNetwork import QLocalServer
-        from PySide6.QtWidgets import QApplication
+        from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
     except ImportError:
         print(
             "The Job Server window needs PySide6. Install it with: "
@@ -82,6 +83,28 @@ def run_gui(config=None):
         dependency_dialog(None, [exc.name or str(exc)])
         return 1
 
+    def show_dashboard():
+        dialog.setWindowState(dialog.windowState() & ~Qt.WindowState.WindowMinimized)
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
+
+    if sys.platform in ("win32", "linux") and QSystemTrayIcon.isSystemTrayAvailable():
+        tray = QSystemTrayIcon(dialog.windowIcon(), dialog)
+        tray.setToolTip("MoleditPy Job Server")
+        menu = QMenu(dialog)
+        menu.addAction("Show dashboard", show_dashboard)
+        menu.addAction("Close dashboard", dialog.close)
+        tray.setContextMenu(menu)
+
+        def on_tray_activated(reason):
+            if reason == QSystemTrayIcon.ActivationReason.Trigger:
+                show_dashboard()
+
+        tray.activated.connect(on_tray_activated)
+        dialog.finished.connect(tray.hide)
+        tray.show()
+
     if server is not None:
         pending = []
 
@@ -96,9 +119,7 @@ def run_gui(config=None):
                     pending.remove(connection)
 
             connection.disconnected.connect(forget)
-            dialog.show()
-            dialog.raise_()
-            dialog.activateWindow()
+            show_dashboard()
 
         server.newConnection.connect(on_connection)
     dialog.show()

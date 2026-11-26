@@ -1,5 +1,12 @@
 # Desktop window
 
+When launched on its own with `python -m job_server gui`, the dashboard shows a
+Job Server icon in the Windows notification area or Ubuntu's top bar. On Ubuntu
+with GNOME, the AppIndicator extension must be enabled before launching the
+dashboard. Use **Show dashboard** in the icon's menu to restore a minimized
+window. Closing the dashboard removes the icon and leaves the server running
+if it was already started.
+
 Right-click a job, user or device for its actions. The same actions are in the menus.
 
 ![Users and devices tab with its right-click menu](gui-users.png)
