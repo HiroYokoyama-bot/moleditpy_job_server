@@ -105,10 +105,6 @@ def test_standalone_dashboard_has_its_own_application_icon(tmp_path, monkeypatch
             app_id = standalone.DESKTOP_APP_ID
             assert app.applicationName() == app_id
             assert app.desktopFileName() == app_id
-            desktop_entry = root / f"{app_id}.desktop"
-            fields = desktop_entry.read_text(encoding="utf-8").splitlines()
-            assert f"StartupWMClass={app_id}" in fields
-            assert f"Icon={app_id}" in fields
         return 0
 
     monkeypatch.setattr(app, "exec", check_dashboard)
@@ -119,3 +115,53 @@ def test_standalone_dashboard_has_its_own_application_icon(tmp_path, monkeypatch
         app.setApplicationName(original_name)
         app.setDesktopFileName(original_desktop_file)
         app.setWindowIcon(original_icon)
+
+
+def test_install_launcher_writes_an_entry_named_after_the_app_id(tmp_path, monkeypatch):
+    from job_server.ui import standalone
+
+    trusted = []
+
+    monkeypatch.setattr(standalone, "_trust", trusted.append)
+    entry, on_desktop = standalone.install_launcher(
+        tmp_path / "my config.json", data_home=tmp_path, desktop=tmp_path / "Desktop"
+    )
+    app_id = standalone.DESKTOP_APP_ID
+    assert entry == tmp_path / "applications" / f"{app_id}.desktop"
+    assert on_desktop == tmp_path / "Desktop" / f"{app_id}.desktop"
+    assert on_desktop.read_text(encoding="utf-8") == entry.read_text(encoding="utf-8")
+    assert trusted == [on_desktop]
+    icon = tmp_path / "icons" / "hicolor" / "128x128" / "apps" / f"{app_id}.png"
+    package = Path(standalone.__file__).resolve().parents[1]
+    assert icon.read_bytes() == (package / "web" / "icon.png").read_bytes()
+    fields = dict(line.split("=", 1) for line in entry.read_text(encoding="utf-8").splitlines()[1:])
+    assert fields["StartupWMClass"] == app_id
+    assert fields["Icon"] == str(icon)
+    assert fields["Path"] == str(package.parent)
+    config = str((tmp_path / "my config.json").resolve())
+    assert fields["Exec"].endswith(
+        f' -m {package.name} gui --config "{config}"'.replace("\\", "\\\\")
+    )
+
+
+def test_desktop_quote_escapes_the_reserved_characters():
+    from job_server.ui.standalone import _desktop_quote
+
+    assert _desktop_quote("/usr/bin/python3") == "/usr/bin/python3"
+    assert _desktop_quote('/opt/my env/$x"%') == r'"/opt/my env/\$x\"%%"'
+
+
+def test_install_launcher_can_skip_the_desktop_icon(tmp_path):
+    from job_server.ui import standalone
+
+    entries = standalone.install_launcher(data_home=tmp_path, desktop=False)
+    assert entries == [tmp_path / "applications" / f"{standalone.DESKTOP_APP_ID}.desktop"]
+
+
+def test_launcher_runs_the_plugin_folder_by_its_own_name(tmp_path):
+    from job_server.ui.standalone import desktop_entry
+
+    plugins = tmp_path / "plugins"
+    text = desktop_entry("/usr/bin/python3", plugins / "moleditpy_job_server", "/i.png")
+    assert "Exec=/usr/bin/python3 -m moleditpy_job_server gui" in text.splitlines()
+    assert f"Path={plugins}" in text.splitlines()

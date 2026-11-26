@@ -19,6 +19,103 @@ from pathlib import Path
 DESKTOP_APP_ID = "hyoko.moleditpy.jobserver"
 
 
+def _desktop_quote(argument):
+    """Quote one Exec argument as the Desktop Entry specification asks."""
+    if argument and not any(c in argument for c in " \t\n\"'\\><~|&;$*?#()`"):
+        return argument
+    escaped = "".join("\\" + c if c in '"`$\\' else c for c in argument)
+    return '"' + escaped.replace("%", "%%") + '"'
+
+
+def desktop_entry(python, package, icon, config=None):
+    """The text of the launcher that opens this dashboard.
+
+    It runs ``python -m <package> gui`` from the folder holding the
+    package, so it works the same for a pip install and for the plugin
+    folder MoleditPy loads it from, whatever that folder is called
+    (``job_server`` from the Plugin Installer, or a renamed clone). The
+    icon is an absolute path: a themed name is not found while a stale
+    icon cache hides it.
+    """
+    package = Path(package)
+    command = [str(python), "-m", package.name, "gui"]
+    if config:
+        command += ["--config", str(Path(config).expanduser().resolve())]
+    return (
+        "[Desktop Entry]\n"
+        "Type=Application\n"
+        "Name=MoleditPy Job Server\n"
+        "Comment=Manage the MoleditPy Job Server\n"
+        f"Exec={' '.join(_desktop_quote(part) for part in command)}\n"
+        f"Path={package.parent}\n"
+        f"Icon={icon}\n"
+        "Terminal=false\n"
+        f"StartupWMClass={DESKTOP_APP_ID}\n"
+        "Categories=Science;\n"
+    )
+
+
+def desktop_folder():
+    """The user's desktop folder: ``~/デスクトップ`` on a Japanese Ubuntu."""
+    import subprocess
+
+    try:
+        found = subprocess.run(
+            ["xdg-user-dir", "DESKTOP"], capture_output=True, text=True, timeout=5, check=False
+        ).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        found = ""
+    # xdg-user-dir answers $HOME itself when no desktop folder is configured.
+    if found and Path(found) != Path.home():
+        return Path(found)
+    return Path.home() / "Desktop"
+
+
+def _trust(entry):
+    """Let GNOME's desktop start the icon without asking first."""
+    import subprocess
+
+    try:
+        subprocess.run(
+            ["gio", "set", str(entry), "metadata::trusted", "true"],
+            capture_output=True,
+            timeout=5,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+
+def install_launcher(config=None, data_home=None, desktop=None):
+    """Write the launcher, its icon and a desktop icon for this dashboard (Linux).
+
+    Returns the paths written: the application-list entry, then the copy on
+    the desktop (unless ``desktop`` is False). The file name must be the app
+    ID: on Wayland that is how GNOME matches the window to its Dock entry.
+    """
+    import os
+    import shutil
+
+    package = Path(__file__).resolve().parents[1]
+    if data_home is None:
+        data_home = os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share"
+    data_home = Path(data_home)
+    icon = data_home / "icons" / "hicolor" / "128x128" / "apps" / f"{DESKTOP_APP_ID}.png"
+    icon.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(package / "web" / "icon.png", icon)
+    text = desktop_entry(sys.executable, package, icon, config)
+    entries = [data_home / "applications" / f"{DESKTOP_APP_ID}.desktop"]
+    if desktop is not False:
+        entries.append(Path(desktop or desktop_folder()) / f"{DESKTOP_APP_ID}.desktop")
+    for entry in entries:
+        entry.parent.mkdir(parents=True, exist_ok=True)
+        entry.write_text(text, encoding="utf-8")
+        entry.chmod(0o755)
+    if len(entries) > 1:
+        _trust(entries[1])
+    return entries
+
+
 def instance_name(config=None):
     """The single-instance name for one configuration file.
 
